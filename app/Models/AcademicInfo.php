@@ -11,7 +11,7 @@ class AcademicInfo extends Model
     protected $table = 'academic_info';
 
     protected $fillable = [
-       'student_id',
+        'student_id',
         'major_id',
         'shift_id',
         'batch_year',

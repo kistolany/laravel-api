@@ -4,14 +4,14 @@ namespace App\Http\Requests\Api\V1;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class AcademicInfoRequest extends FormRequest
+class CommuneRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
      */
     public function authorize(): bool
     {
-        return false;
+        return true;
     }
 
     /**
@@ -22,13 +22,13 @@ class AcademicInfoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'student_id' => 'required|string|max:255',
-            'major_id' => 'required|exists:majors,id',
-            'shift_id' => 'required|exists:shifts,id',
-            'batch_year' => 'required|integer',
-            'stage_id' => 'required|in:stage 1,stage 2,stage 3',
-            'study_days' => 'required|string|max:255',
+            'name_kh'     => 'sometimes|string|max:255',
+            'name_en'     => 'sometimes|string|max:255',
+            'district_id' => 'sometimes|exists:districts,id',
         ];
     }
+    protected function prepareForValidation()
+    {
+        $this->merge(['id' => $this->route('commune')]); // Gets the {commune} ID from the URL
+    }
 }
-
