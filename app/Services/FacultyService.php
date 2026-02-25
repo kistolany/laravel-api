@@ -5,7 +5,7 @@ namespace App\Services;
 use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Http\Resources\Api\V1\FacultyResource;
+use App\Http\Resources\FacultyResource;
 use App\Models\Faculty;
 use Illuminate\Validation\Rule;
 

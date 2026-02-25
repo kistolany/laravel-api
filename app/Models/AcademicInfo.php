@@ -1,10 +1,7 @@
 <?php
 
 namespace App\Models;
-
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-
 
 class AcademicInfo extends Model
 {
@@ -15,15 +12,15 @@ class AcademicInfo extends Model
         'major_id',
         'shift_id',
         'batch_year',
-        'stage_id',
+        'stage',
         'study_days',
-    ];
-    protected $hidden = [
-        'created_at',
-        'updated_at',
     ];
 
     // Relationships
+        public function student()
+    {
+        return $this->belongsTo(Students::class, 'student_id', 'student_id');
+    }
     public function major()
     {
         return $this->belongsTo(Major::class, 'major_id');

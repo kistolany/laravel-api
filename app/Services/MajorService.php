@@ -5,8 +5,7 @@ namespace App\Services;
 use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Http\Resources\Api\V1\MajorResource;
-use App\Models\Faculty;
+use App\Http\Resources\MajorResource;
 use App\Models\Major;
 use Illuminate\Validation\Rule;
 
@@ -17,7 +16,6 @@ class MajorService extends BaseService
     public function __construct(
         protected FacultyService $facultyService
     ) {}
-
 
     public function index(): PaginatedResult
     {
@@ -34,7 +32,6 @@ class MajorService extends BaseService
 
     public function findById(int $id): Major
     {
-
         // find id method
         $subject = Major::find($id);
 
@@ -83,21 +80,6 @@ class MajorService extends BaseService
         // perform delete
         return $subject->delete($subject);
     }
-
-    public function findAllByFacultyId(int $facultyId)
-    {
-        // 1. Verify the faculty actually exists first
-        $this->facultyService->findById($facultyId);
-
-        // 2. Get all majors for this faculty
-        $majors = Major::where('faculty_id', $facultyId)
-            ->latest()
-            ->get();
-
-        // 3. Return as a collection of resources
-        return MajorResource::collection($majors);
-    }
-
 
     // validate method
     protected function validateExisting(array $data, ?int $ignoreId = null): array

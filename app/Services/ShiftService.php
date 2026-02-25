@@ -5,7 +5,7 @@ namespace App\Services;
 use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Http\Resources\Api\V1\ShiftResource;
+use App\Http\Resources\ShiftResource;
 use App\Models\Shift;
 use Illuminate\Validation\Rule;
 

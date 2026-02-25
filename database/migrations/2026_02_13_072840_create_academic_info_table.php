@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('academic_info', function (Blueprint $table) {
             $table->id();
             $table->string('student_id');
-            $table->foreignId('major_id')->constrained('majors')->cascadeOnDelete();
-            $table->foreignId('shift_id')->constrained('shifts')->cascadeOnDelete();
+            $table->integer('major_id');
+            $table->integer('shift_id');
             $table->integer('batch_year');
             $table->string('stage');
             $table->string('study_days');

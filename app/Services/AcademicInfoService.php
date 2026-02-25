@@ -6,11 +6,12 @@ use App\Models\AcademicInfo;
 use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Http\Resources\Api\V1\AcademicInfoResource;
+use App\Http\Resources\AcademicInfoResource;
 use Illuminate\Validation\Rule;
 
 class AcademicInfoService extends BaseService
 {
+    /*
    public function index():PaginatedResult
    {
        $query = AcademicInfo::query()->latest();
@@ -24,6 +25,7 @@ class AcademicInfoService extends BaseService
    }
 
    public function findById(int $id): AcademicInfo
+
     {
         $academicInfo = AcademicInfo::find($id);
 
@@ -66,7 +68,7 @@ class AcademicInfoService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = \Illuminate\Support\Facades\Validator::make($data, [
-              'student_id' => [
+            'student_id' => [
             'required',
             'string',
             Rule::unique('academic_info', 'student_id')->ignore($ignoreId),
@@ -87,9 +89,8 @@ class AcademicInfoService extends BaseService
             'integer',
         ],
 
-        'stage_id' => [
+        'stage' => [
             'required',
-            Rule::in(['stage 1', 'stage 2', 'stage 3']),
         ],
 
         'study_days' => [
@@ -108,5 +109,8 @@ class AcademicInfoService extends BaseService
 
         return $validator->validated();
     }
+
+        * Get All Academic Info
+        */
   
 }

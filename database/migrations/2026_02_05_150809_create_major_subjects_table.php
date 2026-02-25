@@ -17,7 +17,7 @@ return new class extends Migration
             $table->foreignId('major_id')->constrained();
             $table->foreignId('subject_id')->constrained();
 
-            $table->tinyInteger('year_level')->unsigned()->comment('1-4');
+            $table->tinyInteger('year_level')->unsigned()->comment('1-5');
             $table->tinyInteger('semester')->unsigned()->comment('1-2');
 
             $table->timestamps();
