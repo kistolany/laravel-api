@@ -146,13 +146,28 @@ jobs:
   deploy:
     name: Deploy To Server
     runs-on: ubuntu-latest
-    if: ${{ secrets.SERVER_HOST != '' && secrets.SERVER_USER != '' && secrets.SERVER_SSH_KEY != '' }}
     needs:
       - backend
       - mobile
       - docker
     steps:
+      - name: Check deploy secrets
+        id: deploy-check
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          if [[ -n "$SERVER_HOST" && -n "$SERVER_USER" && -n "$SERVER_SSH_KEY" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy skipped because SERVER_HOST, SERVER_USER, or SERVER_SSH_KEY is missing."
+          fi
+
       - name: Deploy over SSH
+        if: ${{ steps.deploy-check.outputs.ready == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/backend:latest
@@ -173,5 +188,6 @@ jobs:
             docker compose down
             docker compose up -d
             docker compose exec -T laravel php artisan migrate --force
+
 
 
