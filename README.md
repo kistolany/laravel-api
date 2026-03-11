@@ -1,59 +1,136 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+﻿# Sarona Monorepo
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+This repository combines the existing Laravel API and Flutter Android app into a single monorepo with Docker-based backend infrastructure and a GitHub Actions CI/CD pipeline.
 
-## About Laravel
+## Repository Structure
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+```text
+repo/
+â”œ backend/                # Existing Laravel API
+â”œ mobile/                 # Existing Flutter Android app
+â”œ docker/
+â”‚  â”” backend/
+â”‚     â”œ Dockerfile
+â”‚     â”” entrypoint.sh
+â”œ nginx/
+â”‚  â”” default.conf
+â”œ .github/
+â”‚  â”” workflows/
+â”‚     â”” ci.yml
+â”œ docker-compose.yml
+â”œ Makefile
+â”” README.md
+```
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Backend
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Local Laravel commands from [`backend/`](/e:/sarona-project/backend):
 
-## Learning Laravel
+```bash
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate
+php artisan serve
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+Useful backend endpoints:
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+- `http://localhost/api`
+- `http://localhost/api/health`
+- `http://localhost/up`
 
-## Laravel Sponsors
+The Docker image uses PHP 8.2, MySQL support, optional Redis environment variables, queue worker support, storage permission fixes, and a multi-stage build.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Mobile
 
-### Premium Partners
+Local Flutter commands from [`mobile/`](/e:/sarona-project/mobile):
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release --dart-define-from-file=.env.example
+```
 
-## Contributing
+APK output:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
 
-## Code of Conduct
+Set the API base URL in [`mobile/.env.example`](/e:/sarona-project/mobile/.env.example) or override it in CI with the `MOBILE_API_BASE_URL` repository variable.
+If you run Laravel with `php artisan serve` instead of Docker, use `http://localhost:8000/api` for desktop testing or `http://10.0.2.2:8000/api` on the Android emulator.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Docker Development
 
-## Security Vulnerabilities
+Build and start the backend stack:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```bash
+docker compose up -d
+```
 
-## License
+Services included:
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- `nginx`
+- `laravel`
+- `queue`
+- `mysql`
+
+The API is exposed at `http://localhost/api`, and nginx forwards PHP requests to the Laravel container.
+
+## CI/CD Pipeline
+
+The GitHub Actions workflow lives at [`.github/workflows/ci.yml`](/e:/sarona-project/.github/workflows/ci.yml) and runs automatically on every push to `main`.
+
+It performs:
+
+- Backend dependency install and `php artisan test`
+- Flutter dependency install, `flutter analyze`, `flutter test`, and release APK build
+- APK artifact upload to GitHub Actions
+- Backend Docker image build and push to `ghcr.io/<owner>/backend:latest`
+- Automatic deployment over SSH after successful checks
+
+Caching is enabled for Composer dependencies, Flutter pub packages, Gradle, and Docker build layers.
+
+## Automatic Deployment
+
+Configure these GitHub secrets before enabling deployment:
+
+- `SERVER_HOST`
+- `SERVER_USER`
+- `SERVER_SSH_KEY`
+
+Optional:
+
+- `SERVER_PATH` to override the default remote path of `~/sarona-project`
+
+The deployment job will:
+
+1. SSH into the server.
+2. `git pull origin main`
+3. Pull `ghcr.io/<owner>/backend:latest`
+4. Restart the Docker Compose stack
+5. Run `php artisan migrate --force`
+
+Make sure the server already has Docker, Docker Compose, and this repository cloned at the deployment path.
+
+## Make Targets
+
+From the repository root:
+
+```bash
+make dev
+make docker-up
+make docker-down
+make test
+make apk
+make deploy BACKEND_IMAGE=ghcr.io/<owner>/backend:latest
+```
+
+## Environment Files
+
+- [`backend/.env.example`](/e:/sarona-project/backend/.env.example) contains the Laravel/MySQL/JWT defaults.
+- [`mobile/.env.example`](/e:/sarona-project/mobile/.env.example) contains `API_BASE_URL=http://localhost/api`.
+
+
