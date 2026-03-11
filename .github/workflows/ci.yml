@@ -1,4 +1,4 @@
-﻿name: CI/CD
+﻿name: Mobile CI
 
 on:
   push:
@@ -6,76 +6,22 @@ on:
       - main
 
 jobs:
-  backend:
-    name: Backend Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up PHP 8.2
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.2"
-          extensions: bcmath, mbstring, pdo_sqlite, sqlite3
-          coverage: none
-
-      - name: Determine Composer cache directory
-        id: composer-cache
-        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Composer dependencies
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('backend/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
-
-      - name: Prepare Laravel environment
-        run: cp .env.example .env
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
-
-      - name: Generate application key
-        run: php artisan key:generate --force
-
-      - name: Run Laravel tests
-        run: php artisan test
-
   mobile:
-    name: Mobile Checks
-    runs-on: ubuntu-latest
+    name: Build Android APK
+    runs-on: [self-hosted, Windows, X64]
     defaults:
       run:
+        shell: powershell
         working-directory: mobile
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
+      - name: Verify Flutter installation
+        run: flutter --version
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Cache Flutter pub packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('mobile/pubspec.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+      - name: Verify Java installation
+        run: java -version
 
       - name: Install Flutter dependencies
         run: flutter pub get
@@ -90,5 +36,10 @@ jobs:
         env:
           MOBILE_API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL }}
         run: |
-          API_BASE_URL="${MOBILE_API_BASE_URL:-http://localhost/api}"
-          flutter build apk --release --dart-define=API_BASE_URL="$API_BASE_URL"
+          $apiBaseUrl = if ($env:MOBILE_API_BASE_URL) { $env:MOBILE_API_BASE_URL } else { 'http://localhost/api' }
+          flutter build apk --release --dart-define=API_BASE_URL=$apiBaseUrl
+
+      - name: Show APK location
+        run: |
+          Write-Host 'APK created at:'
+          Write-Host "$PWD\\build\\app\\outputs\\flutter-apk\\app-release.apk"
