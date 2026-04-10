@@ -1,0 +1,475 @@
+{
+  "info": {
+    "_postman_id": "e6ba2e3f-87b6-4d87-bcfd-3d57d8a6f3e8",
+    "name": "Laravel API Attendance",
+    "description": "Attendance flow collection for the Laravel API. Includes authentication, class and curriculum setup, subject assignment to class URLs, attendance marking, and attendance reporting by major and subject.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "username", "value": "admin" },
+    { "key": "password", "value": "123456" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "majorId", "value": "" },
+    { "key": "subjectId", "value": "" },
+    { "key": "classId", "value": "" },
+    { "key": "classSubjectAssignmentId", "value": "" },
+    { "key": "studentId", "value": "" },
+    { "key": "attendanceSessionId", "value": "" },
+    { "key": "sessionDate", "value": "2026-03-10" },
+    { "key": "sessionNumber", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.access_token) {",
+                  "    pm.collectionVariables.set('accessToken', json.data.access_token);",
+                  "}",
+                  "if (json?.data?.refresh_token) {",
+                  "    pm.collectionVariables.set('refreshToken', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Login and save the JWT access token plus refresh token into collection variables."
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "me"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.access_token) {",
+                  "    pm.collectionVariables.set('accessToken', json.data.access_token);",
+                  "}",
+                  "if (json?.data?.refresh_token) {",
+                  "    pm.collectionVariables.set('refreshToken', json.data.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Attendance Setup",
+      "item": [
+        {
+          "name": "List Majors",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json?.data?.items?.[0];",
+                  "if (first?.id) {",
+                  "    pm.collectionVariables.set('majorId', first.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/majors?size=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "majors"],
+              "query": [
+                { "key": "size", "value": "100" }
+              ]
+            },
+            "description": "Lists majors and stores the first major id into {{majorId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List Classes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json?.data?.items?.[0];",
+                  "if (first?.id) {",
+                  "    pm.collectionVariables.set('classId', first.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/classes?size=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "classes"],
+              "query": [
+                { "key": "size", "value": "100" }
+              ]
+            },
+            "description": "Lists classes and stores the first class id into {{classId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Class",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/classes/{{classId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "classes", "{{classId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Class Subjects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json?.data?.[0];",
+                  "if (first?.id) {",
+                  "    pm.collectionVariables.set('classSubjectAssignmentId', first.id);",
+                  "}",
+                  "if (first?.subject_id) {",
+                  "    pm.collectionVariables.set('subjectId', first.subject_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/classes/{{classId}}/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "classes", "{{classId}}", "subjects"]
+            },
+            "description": "Lists subjects assigned to the selected class slot based on its major, year level, and semester."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign Subject To Class",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const assignment = json?.data;",
+                  "if (assignment?.id) {",
+                  "    pm.collectionVariables.set('classSubjectAssignmentId', assignment.id);",
+                  "}",
+                  "if (assignment?.subject_id) {",
+                  "    pm.collectionVariables.set('subjectId', assignment.subject_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_id\": {{subjectId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/classes/{{classId}}/subjects",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "classes", "{{classId}}", "subjects"]
+            },
+            "description": "Assigns an existing subject to the selected class URL. The backend derives major, year level, and semester from the class."
+          },
+          "response": []
+        },
+        {
+          "name": "List Class Students",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json?.data?.[0];",
+                  "if (first?.id) {",
+                  "    pm.collectionVariables.set('studentId', first.id);",
+                  "} else if (first?.student_id) {",
+                  "    pm.collectionVariables.set('studentId', first.student_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/classes/{{classId}}/students",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "classes", "{{classId}}", "students"]
+            },
+            "description": "Lists students in the selected class and stores the first student id into {{studentId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List Major Subjects",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const first = json?.data?.[0];",
+                  "if (first?.subject_id) {",
+                  "    pm.collectionVariables.set('subjectId', first.subject_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/major-subjects/major/{{majorId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "major-subjects", "major", "{{majorId}}"]
+            },
+            "description": "Lists available subjects for the selected major and stores the first subject id into {{subjectId}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Attendance",
+      "item": [
+        {
+          "name": "Create Attendance Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const id = json?.data?.id ?? json?.data?.data?.id;",
+                  "if (id) {",
+                  "    pm.collectionVariables.set('attendanceSessionId', id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"class_id\": {{classId}},\n  \"subject_id\": {{subjectId}},\n  \"session_date\": \"{{sessionDate}}\",\n  \"session_number\": {{sessionNumber}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/attendance-sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "attendance-sessions"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_id\": {{subjectId}},\n  \"session_date\": \"{{sessionDate}}\",\n  \"records\": [\n    {\n      \"student_id\": {{studentId}},\n      \"status\": \"Present\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/attendance-sessions/{{attendanceSessionId}}/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "attendance-sessions", "{{attendanceSessionId}}", "records"]
+            },
+            "description": "Bulk upsert attendance rows. Change status values to Present, Absent, Late, or Excused."
+          },
+          "response": []
+        },
+        {
+          "name": "Show Attendance Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/attendance-sessions/{{attendanceSessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "attendance-sessions", "{{attendanceSessionId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Attendance Sessions By Major",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/attendance-sessions/major/{{majorId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "attendance-sessions", "major", "{{majorId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Attendance Report By Major And Subject",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/attendance-sessions/major/{{majorId}}/subject/{{subjectId}}/report",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "attendance-sessions", "major", "{{majorId}}", "subject", "{{subjectId}}", "report"]
+            },
+            "description": "Returns a table-ready student attendance report with summary counts such as present, absent, and late."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

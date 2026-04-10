@@ -20,6 +20,11 @@ class Students extends Model
         'email',
         'image',
         'id_card_number',
+        'student_type',
+        'exam_place',
+        'bacll_code',
+        'grade',
+        'doc',
         'registration_date',
         'short_docs_status',
         'status',
@@ -39,6 +44,11 @@ class Students extends Model
     public function addresses(): HasMany
     {
         return $this->hasMany(Address::class, 'student_id', 'id');
+    }
+
+    public function parentGuardian(): HasOne
+    {
+        return $this->hasOne(ParentGuardian::class, 'student_id', 'id');
     }
 
     public function classes(): BelongsToMany

@@ -1,0 +1,411 @@
+<?php
+
+namespace App\Services\Student;
+
+use App\Services\BaseService;
+
+use App\DTOs\PaginatedResult;
+use App\Enums\ResponseStatus;
+use App\Exceptions\ApiException;
+use App\Http\Resources\Student\StudentResource;
+use App\Models\Students;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
+class StudentService extends BaseService
+{
+    /**
+     * Get all students with their academic information
+     */
+    public function index(): PaginatedResult
+    {
+        return $this->trace(__FUNCTION__, function (): PaginatedResult {
+            // 1. Start query with relationships
+            $query = Students::with([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ]);
+            
+            // 2. Filter by Major (Inside academicInfo table)
+            $query->when(request('major_id'), function ($q, $majorId) {
+                $q->whereHas('academicInfo', function ($sub) use ($majorId) {
+                    $sub->where('major_id', $majorId);
+                });
+            });
+            
+            // 3. Filter by Shift (Inside academicInfo table)
+            $query->when(request('shift_id'), function ($q, $shiftId) {
+                $q->whereHas('academicInfo', function ($sub) use ($shiftId) {
+                    $sub->where('shift_id', $shiftId);
+                });
+            });
+            
+            // 4. Filter by Search (Name or Email)
+            $query->when(request('search'), function ($q, $search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->where('full_name_en', 'like', "%{$search}%")
+                        ->orWhere('full_name_kh', 'like', "%{$search}%");
+            
+                });
+            });
+            
+            // 5. Filter by Batch Year
+            $query->when(request('batch_year'), function ($q, $year) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $year));
+            });
+            
+            // 6. Filter by Province (Inside addresses table)
+            $query->when(request('province_id'), function ($q, $provinceId) {
+                $q->whereHas('addresses', function ($sub) use ($provinceId) {
+                    $sub->where('province_id', $provinceId);
+                });
+            });
+            
+            // 7. Final Sort and Paginate
+            return $this->paginateResponse($query->latest(), StudentResource::class);
+            
+            
+        });
+    }
+
+    /**
+     * Get only PAY or PASS students with pagination.
+     */
+    public function payOrPass(): PaginatedResult
+    {
+        return $this->trace(__FUNCTION__, function (): PaginatedResult {
+            $query = Students::with([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ])->whereIn('student_type', ['PAY', 'PASS']);
+            
+            return $this->paginateResponse($query->latest(), StudentResource::class);
+            
+            
+        });
+    }
+
+    /**
+     * Find a specific student by ID
+     */
+    public function findById(int $id): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): Students {
+            $student = Students::with([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ])->find($id);
+            
+            if (!$student) {
+                throw new ApiException(ResponseStatus::NOT_FOUND, "Student with ID :$id not found.");
+            }
+            
+            return $student;
+            
+            
+        });
+    }
+
+    /**
+     * Create Student and Academic Info (Transaction)
+     */
+    public function create(array $data): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($data): Students {
+            $validatedData = $this->validateExisting($data);
+            $addresses = $validatedData['addresses'] ?? [];
+            $parentGuardian = $validatedData['parent_guardian'] ?? null;
+            unset($validatedData['addresses'], $validatedData['parent_guardian']);
+            
+            $validatedData = $this->handleImageUpload($validatedData);
+            
+            return DB::transaction(function () use ($validatedData, $addresses, $parentGuardian) {
+                // 1. Create the Student record
+                $student = Students::create($validatedData);
+            
+                // 2. Create the Academic Info record linked to this student
+                $student->academicInfo()->create($validatedData);
+            
+                // 3. Create Address records linked to this student
+                foreach ($addresses as $addressData) {
+                    $student->addresses()->create($addressData);
+                }
+            
+                // 4. Create Parent/Guardian record
+                if ($parentGuardian) {
+                    $student->parentGuardian()->create($parentGuardian);
+                }
+            
+                return $student->load([
+                    'academicInfo.major',
+                    'academicInfo.shift',
+                    'addresses.province',
+                    'addresses.district',
+                    'addresses.commune',
+                    'parentGuardian',
+                ]);
+            });
+            
+            
+        });
+    }
+
+    /**
+     * Update Student and Academic Info (Transaction)
+     */
+    public function update(int $id, array $data): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $data): Students {
+            $student = $this->findById($id);
+            $validatedData = $this->validateExisting($data, $student->id);
+            $addresses = $validatedData['addresses'] ?? [];
+            $parentGuardian = $validatedData['parent_guardian'] ?? null;
+            unset($validatedData['addresses'], $validatedData['parent_guardian']);
+            
+            $validatedData = $this->handleImageUpload($validatedData, $student->image);
+            
+            return DB::transaction(function () use ($student, $validatedData, $addresses, $parentGuardian) {
+                // 1. Update Student Table
+                $student->update($validatedData);
+            
+                // 2. Update or Create Academic Info Table
+                $student->academicInfo()->updateOrCreate(
+                    ['student_id' => $student->id],
+                    $validatedData
+                );
+            
+                // 3. Update or Create Address records
+                foreach ($addresses as $addressData) {
+                    $student->addresses()->updateOrCreate(
+                        ['address_type' => $addressData['address_type']],
+                        $addressData
+                    );
+                }
+            
+                // 4. Update or Create Parent/Guardian record
+                if ($parentGuardian) {
+                    $student->parentGuardian()->updateOrCreate(
+                        ['student_id' => $student->id],
+                        $parentGuardian
+                    );
+                }
+            
+                return $student->refresh()->load([
+                    'academicInfo.major',
+                    'academicInfo.shift',
+                    'addresses.province',
+                    'addresses.district',
+                    'addresses.commune',
+                    'parentGuardian',
+                ]);
+            });
+            
+            
+        });
+    }
+
+    /**
+     * Delete Student (Academic info will delete if cascade is set in migration)
+     */
+    public function delete(int $id): bool
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): bool {
+            $student = $this->findById($id);
+            return $student->delete();
+            
+            
+        });
+    }
+
+    /**
+     * Validation logic for both tables
+     */
+    protected function validateExisting(array $data, ?int $ignoreId = null): array
+    {
+        $validator = Validator::make($data, [
+            // Students table fields
+            'full_name_kh'   => 'required|string|max:255',
+            'full_name_en'   => 'required|string|max:255',
+            'gender'         => 'required|in:Male,Female,Other',
+            'dob'            => 'required|date',
+            'phone'          => 'nullable|string',
+            'email'          => [
+                'nullable',
+                'email',
+                Rule::unique('students', 'email')->ignore($ignoreId),
+            ],
+            'other_notes' => 'nullable|string',
+            'id_card_number' => [
+                'nullable',
+                'string',
+                Rule::unique('students', 'id_card_number')->ignore($ignoreId),
+            ],
+            'short_docs_status' => 'boolean',
+            'image'          => 'nullable|string',
+            'status'            => 'sometimes|in:enable,disable',
+            'student_type'      => 'required|in:PAY,PENDING,PASS,FAIL',
+            'exam_place'        => 'nullable|string|max:255',
+            'bacll_code'        => 'nullable|string|max:255',
+            'grade'             => 'required|string|max:50',
+            'doc'               => 'nullable|string',
+
+            // Academic Info table fields
+            'major_id'       => 'required|exists:majors,id',
+            'shift_id'       => 'required|exists:shifts,id',
+            'batch_year'     => 'required|integer',
+            'stage'       => 'required|string',
+            'study_days'     => 'required|string',
+
+            // Address table fields
+            'addresses'                 => 'required|array|min:1',
+            'addresses.*.address_type'  => 'required|in:Permanent,Current|distinct',
+            'addresses.*.house_number'  => 'nullable|string|max:255',
+            'addresses.*.street_number' => 'nullable|string|max:255',
+            'addresses.*.village'       => 'nullable|string|max:255',
+            'addresses.*.province_id'   => 'required|exists:provinces,id',
+            'addresses.*.district_id'   => 'required|exists:districts,id',
+            'addresses.*.commune_id'    => 'required|exists:communes,id',
+
+            // Parent/Guardian fields
+            'parent_guardian'                => 'nullable|array',
+            'parent_guardian.father_name'    => 'nullable|string|max:255',
+            'parent_guardian.father_job'     => 'nullable|string|max:255',
+            'parent_guardian.mother_name'    => 'nullable|string|max:255',
+            'parent_guardian.mother_job'     => 'nullable|string|max:255',
+            'parent_guardian.guardian_name'  => 'nullable|string|max:255',
+            'parent_guardian.guardian_job'   => 'nullable|string|max:255',
+            'parent_guardian.guardian_phone' => 'nullable|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            throw new ApiException(
+                ResponseStatus::EXISTING_DATA,
+                "Validation failed for student data.",
+                data: ['errors' => $validator->errors()]
+            );
+        }
+
+        return $validator->validated();
+    }
+
+    /**
+     * Update only student status
+     */
+    public function setStatus(int $id, string $status): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $status): Students {
+            $student = $this->findById($id);
+            $student->update(['status' => $status]);
+            
+            return $student->refresh()->load([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ]);
+            
+            
+        });
+    }
+
+    /**
+     * Update only student type
+     */
+    public function setStudentType(int $id, string $studentType): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $studentType): Students {
+            $student = $this->findById($id);
+            $student->update(['student_type' => $studentType]);
+            
+            return $student->refresh()->load([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ]);
+            
+            
+        });
+    }
+
+    /**
+     * Update student image only
+     */
+    public function updateImage(int $id, UploadedFile $image): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $image): Students {
+            $student = $this->findById($id);
+            $validatedData = $this->handleImageUpload(['image' => $image], $student->image);
+            $student->update($validatedData);
+            
+            return $student->refresh()->load([
+                'academicInfo.major',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+            ]);
+            
+            
+        });
+    }
+
+    /**
+     * Get classes for a student
+     */
+    public function classes(int $id): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): Students {
+            $student = $this->findById($id);
+            $student->load('classes');
+            
+            return $student;
+            
+            
+        });
+    }
+
+    private function handleImageUpload(array $validatedData, ?string $oldPath = null): array
+    {
+        $file = $validatedData['image'] ?? null;
+
+        if ($file instanceof UploadedFile) {
+            if ($oldPath && !str_contains($oldPath, 'res.cloudinary.com')) {
+                Storage::disk('public')->delete($oldPath);
+            }
+            
+            $uploadedFileUrl = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload($file->getRealPath(), [
+                'folder' => 'students',
+                'upload_preset' => 'images'
+            ])->getSecurePath();
+            
+            $validatedData['image'] = $uploadedFileUrl;
+            return $validatedData;
+        }
+
+        unset($validatedData['image']);
+        return $validatedData;
+    }
+}
+
+
+
+

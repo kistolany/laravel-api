@@ -12,9 +12,11 @@ trait ApiResponseTrait
 {
     private function coreResponse(mixed $data, string $message, ResponseStatus $status, string $trace = ""): JsonResponse
     {
+        $timestampMs = sprintf('%.0f', floor(microtime(true) * 1000));
+
         return response()->json([
             'datetime'  => now()->toDateTimeString(),
-            'timestamp' => now()->getTimestampMs(),
+            'timestamp' => $timestampMs,
             'status'    => $status->text(),
             'code'      => $status->value,
             'message'   => $message,
@@ -47,7 +49,6 @@ trait ApiResponseTrait
 
         return $this->coreResponse($data, $msg, ResponseStatus::SUCCESS);
     }
-
 
 
     public function error(string|ResponseMessage $message, ResponseStatus $status = ResponseStatus::BAD_REQUEST, string $trace = ""): JsonResponse

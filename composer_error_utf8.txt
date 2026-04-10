@@ -1,0 +1,43 @@
+﻿composer : ./composer.json has been updated
+At line:1 char:1
++ composer require cloudinary-labs/cloudinary-laravel > 
+composer_error. ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (./composer.jso 
+   n has been updated:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Running composer update cloudinary-labs/cloudinary-laravel
+Loading composer repositories with package information
+Updating dependencies
+Your requirements could not be resolved to an installable 
+set of packages.
+
+  Problem 1
+    - laravel/framework is locked to version v12.49.0 and 
+an update of this package was not requested.
+    - laravel/framework v12.49.0 requires 
+league/flysystem-local ^3.25.1 -> satisfiable by 
+league/flysystem-local[3.31.0].
+    - league/flysystem-local 3.31.0 requires ext-fileinfo * 
+-> it is missing from your system. Install or enable PHP's 
+fileinfo extension.
+
+To enable extensions, verify that they are enabled in your 
+.ini files:
+    - C:\src\php\php.ini
+You can also run `php --ini` in a terminal to see which 
+files are used by PHP in CLI mode.
+Alternatively, you can run Composer with 
+`--ignore-platform-req=ext-fileinfo` to temporarily ignore 
+these required extensions.
+You can also try re-running composer require with an 
+explicit version constraint, e.g. "composer require 
+cloudinary-labs/cloudinary-laravel:*" to figure out if any 
+version is installable, or "composer require 
+cloudinary-labs/cloudinary-laravel:^2.1" if you know which 
+you need.
+
+Installation failed, reverting ./composer.json and 
+./composer.lock to their original content.

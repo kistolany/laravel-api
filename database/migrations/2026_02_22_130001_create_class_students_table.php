@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('class_id')->constrained('classes')->cascadeOnDelete();
             $table->foreignId('student_id')->constrained('students')->cascadeOnDelete();
-            $table->date('joined_date');
+            $table->date('joined_date')->nullable();
             $table->date('left_date')->nullable();
             $table->enum('status', ['Active', 'Suspended', 'Graduated', 'Dropped'])->default('Active');
             $table->timestamps();

@@ -21,7 +21,7 @@ return new class extends Migration
             $table->string('email')->nullable();
             $table->string('id_card_number');
             $table->string('image')->nullable();
-            $table->boolean('short_docs_status');
+            $table->boolean('short_docs_status')->default(false);
             $table->text('other_notes')->nullable();
             $table->timestamps();
         });

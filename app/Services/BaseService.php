@@ -1,21 +1,19 @@
 <?php
 
-
 namespace App\Services;
 
-namespace App\Services;
-
-use App\Traits\Paginatable;
 use App\DTOs\PaginatedResult;
+use App\Services\Concerns\ServiceTraceable;
+use App\Traits\Paginatable;
 use Illuminate\Database\Eloquent\Builder;
 
 class BaseService
 {
-   use Paginatable;
+    use ServiceTraceable;
+    use Paginatable;
 
     protected function handleListing(Builder $query, ?string $resourceClass = null): PaginatedResult
     {
-        // This leverages your Paginatable trait
         return $this->paginateResponse($query, $resourceClass);
     }
 }

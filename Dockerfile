@@ -1,15 +1,28 @@
 FROM php:8.2-cli-alpine
 
-# 1. Install system dependencies & PHP extensions for MySQL
+# 1. Install system dependencies & PHP extensions
 RUN apk add --no-cache \
     libpng-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
     libxml2-dev \
+    libzip-dev \
     zip \
     unzip \
     curl \
-    oniguruma-dev
+    oniguruma-dev \
+    icu-dev
 
-RUN docker-php-ext-install pdo_mysql mbstring bcmath
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install \
+    pdo_mysql \
+    mbstring \
+    bcmath \
+    fileinfo \
+    exif \
+    gd \
+    intl \
+    zip
 
 # 2. Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

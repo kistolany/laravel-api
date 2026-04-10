@@ -1,0 +1,629 @@
+{
+  "info": {
+    "_postman_id": "4d8a1c7d-4db2-4b35-a1cf-6e7d9f0d6a11",
+    "name": "Laravel API Teacher Attendance",
+    "description": "Complete Teacher module flow for the Laravel API. Includes teacher self registration, OTP verification, login by email or username, token refresh, major-scoped student and class access, attendance session creation, attendance marking, and attendance history.\\n\\nRecommended order: Register Teacher -> Verify OTP -> Login -> Attendance Options -> List Classes -> List Class Students -> Create Attendance Session -> Record Attendance -> Attendance History.\\n\\nIf MAIL_MAILER=log, copy the OTP from Laravel logs or database into {{teacherOtpCode}} before running Verify OTP.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "teacherFirstName", "value": "Auto" },
+    { "key": "teacherLastName", "value": "Teacher" },
+    { "key": "teacherGender", "value": "Male" },
+    { "key": "teacherMajorId", "value": "1" },
+    { "key": "teacherSubjectId", "value": "2" },
+    { "key": "teacherEmail", "value": "teacher.auto.20260310@example.com" },
+    { "key": "teacherUsername", "value": "teacher_auto_20260310" },
+    { "key": "teacherPassword", "value": "secret123" },
+    { "key": "teacherPhoneNumber", "value": "0123456789" },
+    { "key": "teacherTelegram", "value": "@teacherauto" },
+    { "key": "teacherAddress", "value": "Phnom Penh" },
+    { "key": "teacherImagePath", "value": "" },
+    { "key": "teacherOtpCode", "value": "" },
+    { "key": "teacherId", "value": "" },
+    { "key": "teacherAccessToken", "value": "" },
+    { "key": "teacherRefreshToken", "value": "" },
+    { "key": "teacherClassId", "value": "" },
+    { "key": "teacherStudentId", "value": "" },
+    { "key": "teacherAttendanceSessionId", "value": "" },
+    { "key": "teacherSessionDate", "value": "2026-03-10" },
+    { "key": "teacherSessionNumber", "value": "1" },
+    { "key": "teacherAttendanceStatus", "value": "Present" }
+  ],
+  "item": [
+    {
+      "name": "Teacher Auth",
+      "item": [
+        {
+          "name": "Register Teacher",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const teacher = json?.data?.teacher ?? null;",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }",
+                  "if (teacher?.email) { pm.collectionVariables.set('teacherEmail', teacher.email); pm.environment.set('teacherEmail', teacher.email); }",
+                  "if (teacher?.username) { pm.collectionVariables.set('teacherUsername', teacher.username); pm.environment.set('teacherUsername', teacher.username); }",
+                  "if (teacher?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(teacher.major.id)); pm.environment.set('teacherMajorId', String(teacher.major.id)); }",
+                  "if (teacher?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(teacher.subject.id)); pm.environment.set('teacherSubjectId', String(teacher.subject.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "first_name", "value": "{{teacherFirstName}}", "type": "text" },
+                { "key": "last_name", "value": "{{teacherLastName}}", "type": "text" },
+                { "key": "gender", "value": "{{teacherGender}}", "type": "text" },
+                { "key": "major_id", "value": "{{teacherMajorId}}", "type": "text" },
+                { "key": "subject_id", "value": "{{teacherSubjectId}}", "type": "text" },
+                { "key": "email", "value": "{{teacherEmail}}", "type": "text" },
+                { "key": "username", "value": "{{teacherUsername}}", "type": "text" },
+                { "key": "password", "value": "{{teacherPassword}}", "type": "text" },
+                { "key": "phone_number", "value": "{{teacherPhoneNumber}}", "type": "text" },
+                { "key": "telegram", "value": "{{teacherTelegram}}", "type": "text" },
+                { "key": "address", "value": "{{teacherAddress}}", "type": "text" },
+                { "key": "image", "type": "file", "src": "{{teacherImagePath}}", "disabled": true }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "register"]
+            },
+            "description": "Teacher self registration. Enable the image field and choose a file if you want to upload a profile image."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const teacher = json?.data?.teacher ?? null;",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }",
+                  "if (teacher?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(teacher.major.id)); pm.environment.set('teacherMajorId', String(teacher.major.id)); }",
+                  "if (teacher?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(teacher.subject.id)); pm.environment.set('teacherSubjectId', String(teacher.subject.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{teacherEmail}}\",\n  \"otp_code\": \"{{teacherOtpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "verify-otp"]
+            },
+            "description": "Set {{teacherOtpCode}} first. In this project OTP may be logged instead of emailed if MAIL_MAILER=log."
+          },
+          "response": []
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{teacherEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/resend-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "resend-otp"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login With Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const data = json?.data ?? {};",
+                  "const teacher = data?.teacher ?? null;",
+                  "if (data?.access_token) { pm.collectionVariables.set('teacherAccessToken', data.access_token); pm.environment.set('teacherAccessToken', data.access_token); }",
+                  "if (data?.refresh_token) { pm.collectionVariables.set('teacherRefreshToken', data.refresh_token); pm.environment.set('teacherRefreshToken', data.refresh_token); }",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }",
+                  "if (teacher?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(teacher.major.id)); pm.environment.set('teacherMajorId', String(teacher.major.id)); }",
+                  "if (teacher?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(teacher.subject.id)); pm.environment.set('teacherSubjectId', String(teacher.subject.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{teacherEmail}}\",\n  \"password\": \"{{teacherPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login With Username",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const data = json?.data ?? {};",
+                  "const teacher = data?.teacher ?? null;",
+                  "if (data?.access_token) { pm.collectionVariables.set('teacherAccessToken', data.access_token); pm.environment.set('teacherAccessToken', data.access_token); }",
+                  "if (data?.refresh_token) { pm.collectionVariables.set('teacherRefreshToken', data.refresh_token); pm.environment.set('teacherRefreshToken', data.refresh_token); }",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }",
+                  "if (teacher?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(teacher.major.id)); pm.environment.set('teacherMajorId', String(teacher.major.id)); }",
+                  "if (teacher?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(teacher.subject.id)); pm.environment.set('teacherSubjectId', String(teacher.subject.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"{{teacherUsername}}\",\n  \"password\": \"{{teacherPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Me",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const teacher = json?.data ?? null;",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }",
+                  "if (teacher?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(teacher.major.id)); pm.environment.set('teacherMajorId', String(teacher.major.id)); }",
+                  "if (teacher?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(teacher.subject.id)); pm.environment.set('teacherSubjectId', String(teacher.subject.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "me"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const data = json?.data ?? {};",
+                  "const teacher = data?.teacher ?? null;",
+                  "if (data?.access_token) { pm.collectionVariables.set('teacherAccessToken', data.access_token); pm.environment.set('teacherAccessToken', data.access_token); }",
+                  "if (data?.refresh_token) { pm.collectionVariables.set('teacherRefreshToken', data.refresh_token); pm.environment.set('teacherRefreshToken', data.refresh_token); }",
+                  "if (teacher?.id) { pm.collectionVariables.set('teacherId', String(teacher.id)); pm.environment.set('teacherId', String(teacher.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{teacherRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "refresh"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{teacherRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "logout"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout All",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/logout-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "logout-all"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{teacherRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher-auth/revoke",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher-auth", "revoke"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Teacher Attendance",
+      "item": [
+        {
+          "name": "Attendance Options",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const data = json?.data ?? {};",
+                  "const firstClass = data?.classes?.[0] ?? null;",
+                  "if (data?.major?.id) { pm.collectionVariables.set('teacherMajorId', String(data.major.id)); pm.environment.set('teacherMajorId', String(data.major.id)); }",
+                  "if (data?.subject?.id) { pm.collectionVariables.set('teacherSubjectId', String(data.subject.id)); pm.environment.set('teacherSubjectId', String(data.subject.id)); }",
+                  "if (firstClass?.id) { pm.collectionVariables.set('teacherClassId', String(firstClass.id)); pm.environment.set('teacherClassId', String(firstClass.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/attendance/options",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "attendance", "options"]
+            },
+            "description": "Returns the teacher major, subject, and only the classes valid for attendance based on major_subjects mappings."
+          },
+          "response": []
+        },
+        {
+          "name": "List Teacher Classes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const first = json?.data?.items?.[0] ?? null;",
+                  "if (first?.id) { pm.collectionVariables.set('teacherClassId', String(first.id)); pm.environment.set('teacherClassId', String(first.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/classes?size=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "classes"],
+              "query": [
+                { "key": "size", "value": "100" }
+              ]
+            },
+            "description": "Lists all classes in the teacher major. Use Attendance Options when you need only classes valid for the teacher subject."
+          },
+          "response": []
+        },
+        {
+          "name": "List Teacher Students",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/students?size=100&class_id={{teacherClassId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "students"],
+              "query": [
+                { "key": "size", "value": "100" },
+                { "key": "class_id", "value": "{{teacherClassId}}" }
+              ]
+            },
+            "description": "Lists students in the teacher major. Keep class_id if you want the result limited to a selected class."
+          },
+          "response": []
+        },
+        {
+          "name": "List Teacher Class Students",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const first = json?.data?.[0] ?? null;",
+                  "if (first?.id) { pm.collectionVariables.set('teacherStudentId', String(first.id)); pm.environment.set('teacherStudentId', String(first.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/classes/{{teacherClassId}}/students",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "classes", "{{teacherClassId}}", "students"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Attendance Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const session = json?.data?.data ?? json?.data ?? null;",
+                  "if (session?.id) { pm.collectionVariables.set('teacherAttendanceSessionId', String(session.id)); pm.environment.set('teacherAttendanceSessionId', String(session.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"class_id\": {{teacherClassId}},\n  \"subject_id\": {{teacherSubjectId}},\n  \"session_date\": \"{{teacherSessionDate}}\",\n  \"session_number\": {{teacherSessionNumber}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/attendance/sessions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "attendance", "sessions"]
+            },
+            "description": "Creates an attendance session only if the selected class belongs to the teacher major and the teacher subject is assigned to that class year and semester."
+          },
+          "response": []
+        },
+        {
+          "name": "Record Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject_id\": {{teacherSubjectId}},\n  \"session_date\": \"{{teacherSessionDate}}\",\n  \"records\": [\n    {\n      \"student_id\": {{teacherStudentId}},\n      \"status\": \"{{teacherAttendanceStatus}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/attendance/sessions/{{teacherAttendanceSessionId}}/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "attendance", "sessions", "{{teacherAttendanceSessionId}}", "records"]
+            },
+            "description": "Bulk upsert attendance rows. Valid status values: Present, Absent, Late, Excused."
+          },
+          "response": []
+        },
+        {
+          "name": "Attendance History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try { json = pm.response.json(); } catch (error) { console.log(error); }",
+                  "const first = json?.data?.items?.[0] ?? null;",
+                  "if (first?.id) { pm.collectionVariables.set('teacherAttendanceSessionId', String(first.id)); pm.environment.set('teacherAttendanceSessionId', String(first.id)); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/attendance/history?size=100",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "attendance", "history"],
+              "query": [
+                { "key": "size", "value": "100" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Show Attendance Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{teacherAccessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/teacher/attendance/history/{{teacherAttendanceSessionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "teacher", "attendance", "history", "{{teacherAttendanceSessionId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

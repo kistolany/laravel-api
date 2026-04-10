@@ -1,0 +1,106 @@
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Permission;
+use Illuminate\Database\Seeder;
+
+class PermissionSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $permissions = [
+            'user.view',
+            'user.create',
+            'user.update',
+            'user.delete',
+            'user.status.update',
+
+            'student.view',
+            'student.create',
+            'student.update',
+            'student.delete',
+            'student.disable',
+            'student.image.update',
+            'student.classes.view',
+            'student.card.view',
+            'student.card.by_major.view',
+
+            'class.view',
+            'class.create',
+            'class.students.view',
+            'class.students.add',
+            'class.students.add_by_major',
+            'class.subjects.view',
+            'class.subjects.assign',
+
+            'attendance.view',
+            'attendance.create',
+            'attendance.record',
+            'attendance.report.by_major_subject',
+
+            'major.view',
+            'major.create',
+            'major.update',
+            'major.delete',
+            'major.by_faculty.view',
+
+            'faculty.view',
+            'faculty.create',
+            'faculty.update',
+            'faculty.delete',
+
+            'subject.view',
+            'subject.create',
+            'subject.update',
+            'subject.delete',
+
+            'major_subject.view',
+            'major_subject.create',
+            'major_subject.update',
+            'major_subject.delete',
+            'major_subject.by_major.view',
+
+            'academic_info.view',
+            'academic_info.create',
+            'academic_info.update',
+            'academic_info.delete',
+            'academic_info.by_major.view',
+            'academic_info.by_shift.view',
+
+            'shift.view',
+            'shift.create',
+            'shift.update',
+            'shift.delete',
+
+            'scholarship.view',
+            'scholarship.create',
+            'scholarship.update',
+            'scholarship.delete',
+
+            'student_registration.view',
+            'student_registration.create',
+            'student_registration.update',
+            'student_registration.delete',
+
+            'province.view',
+            'province.create',
+            'province.update',
+            'province.delete',
+
+            'district.view',
+            'district.create',
+            'district.update',
+            'district.delete',
+
+            'commune.view',
+            'commune.create',
+            'commune.update',
+            'commune.delete',
+        ];
+
+        foreach ($permissions as $permission) {
+            Permission::updateOrCreate(['name' => $permission]);
+        }
+    }
+}
