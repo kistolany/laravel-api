@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Scholarship\ScholarshipResource;
 use App\Models\Scholarship;
+use Illuminate\Support\Facades\Log;
 class ScholarshipService extends BaseService
 {
     public function index(): PaginatedResult
@@ -35,6 +36,7 @@ class ScholarshipService extends BaseService
             $scholarship = Scholarship::with(['student.parentGuardian'])->find($id);
             
             if (!$scholarship) {
+                Log::warning('Scholarship not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Scholarship with ID :$id not found.");
             }
             

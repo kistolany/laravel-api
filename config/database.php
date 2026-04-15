@@ -131,6 +131,12 @@ return [
         'update_date_on_publish' => true,
     ],
 
+    'slow_query_log' => [
+        'enabled' => env('DB_SLOW_QUERY_LOG_ENABLED', false),
+        'threshold_ms' => env('DB_SLOW_QUERY_THRESHOLD_MS', 200),
+        'sample_rate' => env('DB_SLOW_QUERY_SAMPLE_RATE', 1),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Redis Databases

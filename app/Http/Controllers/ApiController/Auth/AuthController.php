@@ -137,8 +137,8 @@ class AuthController extends Controller
                 $request->ip(),
                 $request->userAgent()
             );
-        } catch (AuthenticationException) {
-            return $this->error('account not exist', ResponseStatus::UNAUTHORIZED);
+        } catch (AuthenticationException $e) {
+            return $this->error($e->getMessage(), ResponseStatus::UNAUTHORIZED);
         } catch (AuthorizationException) {
             return $this->error('Account is inactive.', ResponseStatus::FORBIDDEN);
         } catch (ApiException $e) {

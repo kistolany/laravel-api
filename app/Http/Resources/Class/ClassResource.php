@@ -10,15 +10,7 @@ class ClassResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'code' => $this->code,
-            'major_id' => $this->major_id,
-            'shift_id' => $this->shift_id,
-            'academic_year' => $this->academic_year,
-            'year_level' => $this->year_level,
-            'semester' => $this->semester,
-            'section' => $this->section,
-            'max_students' => $this->max_students,
-            'is_active' => $this->is_active,
+            'name' => $this->name,
             'students' => ClassStudentResource::collection($this->whenLoaded('students')),
         ];
     }

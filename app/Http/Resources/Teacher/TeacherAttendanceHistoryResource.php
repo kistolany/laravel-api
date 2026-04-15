@@ -9,30 +9,46 @@ class TeacherAttendanceHistoryResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $summary = [
-            'present' => 0,
-            'absent' => 0,
-            'late' => 0,
-            'excused' => 0,
-            'total_records' => $this->records->count(),
-        ];
+        $totalRecords = $this->resource->getAttribute('total_records');
+        $presentCount = $this->resource->getAttribute('present_count');
+        $absentCount = $this->resource->getAttribute('absent_count');
+        $lateCount = $this->resource->getAttribute('late_count');
+        $excusedCount = $this->resource->getAttribute('excused_count');
 
-        foreach ($this->records as $record) {
-            $status = strtolower((string) $record->status);
+        if ($totalRecords !== null) {
+            $summary = [
+                'present' => (int) $presentCount,
+                'absent' => (int) $absentCount,
+                'late' => (int) $lateCount,
+                'excused' => (int) $excusedCount,
+                'total_records' => (int) $totalRecords,
+            ];
+        } else {
+            $summary = [
+                'present' => 0,
+                'absent' => 0,
+                'late' => 0,
+                'excused' => 0,
+                'total_records' => $this->records->count(),
+            ];
 
-            switch ($status) {
-                case 'present':
-                    $summary['present']++;
-                    break;
-                case 'late':
-                    $summary['late']++;
-                    break;
-                case 'excused':
-                    $summary['excused']++;
-                    break;
-                default:
-                    $summary['absent']++;
-                    break;
+            foreach ($this->records as $record) {
+                $status = strtolower((string) $record->status);
+
+                switch ($status) {
+                    case 'present':
+                        $summary['present']++;
+                        break;
+                    case 'late':
+                        $summary['late']++;
+                        break;
+                    case 'excused':
+                        $summary['excused']++;
+                        break;
+                    default:
+                        $summary['absent']++;
+                        break;
+                }
             }
         }
 

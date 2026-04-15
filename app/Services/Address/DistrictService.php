@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Address\DistrictResource;
 use App\Models\District;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 class DistrictService extends BaseService
@@ -32,6 +33,7 @@ class DistrictService extends BaseService
             $district = District::find($id);
             
             if (!$district) {
+                Log::warning('District not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "District not found.");
             }
             
@@ -92,9 +94,21 @@ class DistrictService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name')
+                ?: $validator->errors()->first('province_id')
+                ?: 'Validation failed for district data.';
+
+            Log::warning('District validation failed.', [
+                'province_id' => $provinceId,
+                'name' => $data['name'] ?? null,
+                'ignore_id' => $ignoreId,
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "The district name already exists in this province.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

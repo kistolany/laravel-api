@@ -114,4 +114,13 @@ return [
 
     'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
 
+    'lookup' => [
+        'enabled' => env('LOOKUP_CACHE_ENABLED', true),
+        'ttl_seconds' => env('LOOKUP_CACHE_TTL_SECONDS', 300),
+    ],
+
+    'audit_log_list' => [
+        'ttl_seconds' => env('AUDIT_LOG_LIST_CACHE_TTL_SECONDS', 8),
+    ],
+
 ];

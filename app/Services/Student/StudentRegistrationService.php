@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Student\StudentRegistrationResource;
 use App\Models\StudentRegistration;
+use Illuminate\Support\Facades\Log;
 class StudentRegistrationService extends BaseService
 {
     public function index(): PaginatedResult
@@ -35,6 +36,7 @@ class StudentRegistrationService extends BaseService
             $registration = StudentRegistration::with('student')->find($id);
             
             if (!$registration) {
+                Log::warning('Student registration not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Student Registration with ID :$id not found.");
             }
             

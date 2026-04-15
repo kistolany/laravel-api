@@ -15,6 +15,7 @@ use App\Models\Classes;
 use App\Models\MajorSubject;
 use App\Models\Students;
 use App\Models\Teacher;
+use Illuminate\Support\Facades\Log;
 class TeacherModuleService extends BaseService
 {
     public function students(Teacher $teacher): PaginatedResult
@@ -135,8 +136,15 @@ class TeacherModuleService extends BaseService
                 'classroom',
                 'major',
                 'subject',
-                'records',
-            ])->where('teacher_id', $teacher->id);
+            ])
+                ->withCount([
+                    'records as total_records',
+                    'records as present_count' => fn ($records) => $records->whereIn('status', ['Present', 'present', 'P', 'p']),
+                    'records as absent_count' => fn ($records) => $records->whereIn('status', ['Absent', 'absent', 'A', 'a']),
+                    'records as late_count' => fn ($records) => $records->whereIn('status', ['Late', 'late', 'L', 'l']),
+                    'records as excused_count' => fn ($records) => $records->whereIn('status', ['Excused', 'excused', 'Excuse', 'excuse', 'E', 'e']),
+                ])
+                ->where('teacher_id', $teacher->id);
             
             $query->when(request('class_id'), fn ($q, $classId) => $q->where('class_id', $classId));
             $query->when(request('session_date'), fn ($q, $date) => $q->whereDate('session_date', $date));
@@ -158,6 +166,10 @@ class TeacherModuleService extends BaseService
             $session = AttendanceSession::where('teacher_id', $teacher->id)->find($sessionId);
             
             if (!$session) {
+                Log::warning('Teacher attendance session not found.', [
+                    'teacher_id' => $teacher->id,
+                    'session_id' => $sessionId,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Attendance session not found.');
             }
             
@@ -179,6 +191,10 @@ class TeacherModuleService extends BaseService
             $class = $query->find($classId);
             
             if (!$class) {
+                Log::warning('Teacher class not found.', [
+                    'teacher_id' => $teacher->id,
+                    'class_id' => $classId,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Class not found for this teacher.');
             }
             

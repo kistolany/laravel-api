@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Shift\ShiftResource;
 use App\Models\Shift;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 class ShiftService extends BaseService
 {
@@ -30,6 +31,7 @@ class ShiftService extends BaseService
             
             // Validate exist id
             if (!$shift) {
+                Log::warning('Shift not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND,"Shift id :$id not found.");
             }
             return $shift;
@@ -95,9 +97,23 @@ class ShiftService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name_en')
+                ?: $validator->errors()->first('name_kh')
+                ?: $validator->errors()->first('time_range')
+                ?: 'Validation failed for shift data.';
+
+            Log::warning('Shift validation failed.', [
+                'ignore_id' => $ignoreId,
+                'name_en' => $data['name_en'] ?? null,
+                'name_kh' => $data['name_kh'] ?? null,
+                'time_range' => $data['time_range'] ?? null,
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "Shift already exists.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

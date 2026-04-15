@@ -10,6 +10,7 @@ use App\Exceptions\ApiException;
 use App\Http\Resources\Class\ClassResource;
 use App\Models\Classes;
 use App\Models\Students;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 class ClassService extends BaseService
@@ -37,6 +38,10 @@ class ClassService extends BaseService
             $class = $query->find($id);
             
             if (!$class) {
+                Log::warning('Class not found.', [
+                    'id' => $id,
+                    'with_students' => $withStudents,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Class with ID :$id not found.");
             }
             
@@ -67,6 +72,10 @@ class ClassService extends BaseService
             $student = Students::find($studentId);
             
             if (!$student) {
+                Log::warning('Class addStudent failed: student not found.', [
+                    'class_id' => $classId,
+                    'student_id' => $studentId,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Student not found.");
             }
             
@@ -75,6 +84,10 @@ class ClassService extends BaseService
                 ->exists();
             
             if ($exists) {
+                Log::warning('Class addStudent failed: duplicate student in class.', [
+                    'class_id' => $classId,
+                    'student_id' => $studentId,
+                ]);
                 throw new ApiException(ResponseStatus::EXISTING_DATA, "Student already exists in this class.");
             }
             
@@ -98,13 +111,17 @@ class ClassService extends BaseService
             $validatedData = $this->validateBulkStudentAssignment($data);
             $class = $this->findById($classId);
             
-            $majorId = $validatedData['major_id'] ?? $class->major_id;
+            $majorId = $validatedData['major_id'];
             
             $studentIds = Students::whereHas('academicInfo', function ($q) use ($majorId) {
                 $q->where('major_id', $majorId);
             })->pluck('id');
             
             if ($studentIds->isEmpty()) {
+                Log::warning('Class addStudentsByMajor failed: no students found for major.', [
+                    'class_id' => $classId,
+                    'major_id' => $majorId,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "No students found for this major.");
             }
             
@@ -143,26 +160,25 @@ class ClassService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = Validator::make($data, [
-            'code' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('classes', 'code')->ignore($ignoreId),
-            ],
-            'major_id' => 'required|exists:majors,id',
-            'shift_id' => 'required|exists:shifts,id',
-            'academic_year' => 'required|string|max:20',
-            'year_level' => 'required|integer|min:1|max:8',
-            'semester' => 'required|integer|min:1|max:3',
-            'section' => 'required|string|max:10',
-            'max_students' => 'nullable|integer|min:0',
-            'is_active' => 'nullable|boolean',
+            'name' => 'required|string|max:255',
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name')
+                ?: 'Validation failed for class data.';
+
+            Log::warning('Class validation failed.', [
+                'ignore_id' => $ignoreId,
+                'data' => [
+                    'name' => $data['name'] ?? null,
+                ],
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "Validation failed for class data.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }
@@ -180,9 +196,24 @@ class ClassService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('student_id')
+                ?: $validator->errors()->first('joined_date')
+                ?: 'Validation failed for class student data.';
+
+            Log::warning('Class student assignment validation failed.', [
+                'data' => [
+                    'student_id' => $data['student_id'] ?? null,
+                    'joined_date' => $data['joined_date'] ?? null,
+                    'left_date' => $data['left_date'] ?? null,
+                    'status' => $data['status'] ?? null,
+                ],
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "Validation failed for class student data.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }
@@ -200,9 +231,24 @@ class ClassService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('major_id')
+                ?: $validator->errors()->first('joined_date')
+                ?: 'Validation failed for class student data.';
+
+            Log::warning('Class bulk student assignment validation failed.', [
+                'data' => [
+                    'major_id' => $data['major_id'] ?? null,
+                    'joined_date' => $data['joined_date'] ?? null,
+                    'left_date' => $data['left_date'] ?? null,
+                    'status' => $data['status'] ?? null,
+                ],
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "Validation failed for class student data.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }
@@ -229,6 +275,10 @@ class ClassService extends BaseService
                 return (int) $id;
             }
         }
+
+        Log::warning('Invalid student_id format for class assignment.', [
+            'value' => $value,
+        ]);
 
         throw new ApiException(ResponseStatus::BAD_REQUEST, "Invalid student_id format.");
     }

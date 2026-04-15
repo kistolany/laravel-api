@@ -19,7 +19,7 @@ class AcademicInfo extends Model
     // Relationships
         public function student()
     {
-        return $this->belongsTo(Students::class, 'student_id', 'student_id');
+        return $this->belongsTo(Students::class, 'student_id', 'id');
     }
     public function major()
     {

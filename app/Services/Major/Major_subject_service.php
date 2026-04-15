@@ -12,6 +12,7 @@ use App\Models\Classes;
 use App\Models\MajorSubject;
 use App\Models\Subject;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 class Major_subject_service extends BaseService
 {
@@ -70,6 +71,7 @@ class Major_subject_service extends BaseService
             
             // Validate exist id
             if (!$assignment) {
+                Log::warning('Major-subject assignment not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Assignment not found.");
             }
             
@@ -149,6 +151,7 @@ class Major_subject_service extends BaseService
             $assignment = MajorSubject::find($id);
             
             if (!$assignment) {
+                Log::warning('Curriculum assignment not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Curriculum assignment not found.");
             }
             
@@ -196,7 +199,26 @@ class Major_subject_service extends BaseService
         });
 
         if ($validator->fails()) {
-            throw new ApiException(ResponseStatus::EXISTING_DATA, "Validation Error", ['errors' => $validator->errors()]);
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('subject_id')
+                ?: $validator->errors()->first('major_id')
+                ?: $validator->errors()->first('year_level')
+                ?: $validator->errors()->first('semester')
+                ?: 'Validation failed for major-subject assignment.';
+
+            Log::warning('Major-subject assignment validation failed.', [
+                'ignore_id' => $ignoreId,
+                'data' => [
+                    'major_id' => $data['major_id'] ?? null,
+                    'subject_id' => $data['subject_id'] ?? null,
+                    'year_level' => $data['year_level'] ?? null,
+                    'semester' => $data['semester'] ?? null,
+                    'name_eg' => $data['name_eg'] ?? null,
+                ],
+                'errors' => $errors,
+            ]);
+
+            throw new ApiException(ResponseStatus::EXISTING_DATA, $message, ['errors' => $validator->errors()]);
         }
 
         return $validator->validated();
@@ -207,6 +229,7 @@ class Major_subject_service extends BaseService
         $class = Classes::find($classId);
 
         if (!$class) {
+            Log::warning('Class not found for major-subject operation.', ['class_id' => $classId]);
             throw new ApiException(ResponseStatus::NOT_FOUND, 'Class not found.');
         }
 

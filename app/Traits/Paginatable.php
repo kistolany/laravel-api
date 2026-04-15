@@ -14,6 +14,7 @@ trait Paginatable
     {
         // 1. Global logic: Get 'size' from URL for every list in the app
         $size = request()->integer('size', 10);
+        $size = max(1, min($size, 100));
 
         // 2. Execute Pagination (Laravel handles 'page' automatically from URL)
         $paginator = $query->paginate($size);

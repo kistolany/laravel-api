@@ -129,4 +129,11 @@ return [
 
     ],
 
+    'audit_log_diagnostics' => [
+        'enabled' => env('AUDIT_LOG_DIAGNOSTICS_ENABLED', true),
+        'slow_threshold_ms' => env('AUDIT_LOG_SLOW_THRESHOLD_MS', 400),
+        'sample_rate' => env('AUDIT_LOG_DIAGNOSTICS_SAMPLE_RATE', 1),
+        'log_all' => env('AUDIT_LOG_DIAGNOSTICS_LOG_ALL', false),
+    ],
+
 ];

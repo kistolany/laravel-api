@@ -64,6 +64,7 @@ class AttendanceSessionService
         return $this->trace(__FUNCTION__, function () use ($majorId): array {
             $sessions = $this->getSessionsByMajorId($majorId);
             $rows = [];
+            $rowNumber = 1;
             $summary = [
                 'total_records' => 0,
                 'present' => 0,
@@ -96,7 +97,7 @@ class AttendanceSessionService
                     }
             
                     $rows[] = [
-                        'no' => count($rows) + 1,
+                        'no' => $rowNumber++,
                         'student_code' => $this->formatStudentCode((int) $record->student_id),
                         'student_name' => $record->student?->full_name_en ?? '',
                         'gender' => $record->student?->gender ?? '',
@@ -363,12 +364,13 @@ class AttendanceSessionService
 
         $validStudentIds = $classroom->students->pluck('id')->all();
         $validSet = array_fill_keys($validStudentIds, true);
+        $resolvedStudentIds = $this->resolveStudentIdsFromRecords($data['records']);
         $now = now();
         $rows = [];
         $errors = [];
 
         foreach ($data['records'] as $index => $record) {
-            $resolvedId = $this->resolveStudentId($record['student_id']);
+            $resolvedId = $resolvedStudentIds[$index] ?? null;
 
             if (!$resolvedId) {
                 $errors["records.{$index}.student_id"][] = 'Invalid student_id format.';
@@ -630,27 +632,73 @@ class AttendanceSessionService
         };
     }
 
-    private function resolveStudentId(mixed $value): ?int
+    private function resolveStudentIdsFromRecords(array $records): array
     {
-        if (is_numeric($value)) {
-            return (int) $value;
-        }
+        $idCardNumbers = [];
 
-        if (is_string($value) && preg_match('/^B(\d{6,})$/', $value, $matches)) {
-            $id = (int) ltrim($matches[1], '0');
-            if ($id > 0) {
-                return $id;
+        foreach ($records as $record) {
+            $value = $record['student_id'] ?? null;
+
+            if (!is_string($value)) {
+                continue;
             }
-        }
 
-        if (is_string($value)) {
-            $id = Students::where('id_card_number', $value)->value('id');
-            if ($id) {
-                return (int) $id;
+            $value = trim($value);
+
+            if ($value === '' || is_numeric($value)) {
+                continue;
             }
+
+            if (preg_match('/^B(\d{6,})$/', $value)) {
+                continue;
+            }
+
+            $idCardNumbers[] = $value;
         }
 
-        return null;
+        $idCardMap = [];
+        $idCardNumbers = array_values(array_unique($idCardNumbers));
+
+        if (!empty($idCardNumbers)) {
+            $idCardMap = Students::query()
+                ->whereIn('id_card_number', $idCardNumbers)
+                ->pluck('id', 'id_card_number')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        $resolved = [];
+
+        foreach ($records as $index => $record) {
+            $value = $record['student_id'] ?? null;
+
+            if (is_numeric($value)) {
+                $resolved[$index] = (int) $value;
+                continue;
+            }
+
+            if (is_string($value)) {
+                $value = trim($value);
+
+                if ($value === '') {
+                    $resolved[$index] = null;
+                    continue;
+                }
+
+                if (preg_match('/^B(\d{6,})$/', $value, $matches)) {
+                    $id = (int) ltrim($matches[1], '0');
+                    $resolved[$index] = $id > 0 ? $id : null;
+                    continue;
+                }
+
+                $resolved[$index] = $idCardMap[$value] ?? null;
+                continue;
+            }
+
+            $resolved[$index] = null;
+        }
+
+        return $resolved;
     }
 
     private function formatDate(mixed $value): string

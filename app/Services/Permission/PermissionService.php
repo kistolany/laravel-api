@@ -6,6 +6,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Models\Permission;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use App\Services\Concerns\ServiceTraceable;
 class PermissionService
 {
@@ -39,6 +40,7 @@ class PermissionService
             $permission = Permission::find($id);
             
             if (!$permission) {
+                Log::warning('Permission not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Permission not found.');
             }
             
@@ -69,6 +71,7 @@ class PermissionService
             $permission = Permission::find($id);
             
             if (!$permission) {
+                Log::warning('Permission delete failed: not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Permission not found.');
             }
             

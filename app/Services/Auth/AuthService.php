@@ -37,6 +37,7 @@ class AuthService
             $imagePath = null;
             if (isset($data['image']) && $data['image'] instanceof \Illuminate\Http\UploadedFile) {
                 $imagePath = $this->uploadImage($data['image']);
+                Log::info("User registration with image upload, image path: {$imagePath}");
             }
             
             $user = User::create([
@@ -159,7 +160,7 @@ class AuthService
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
             $query = User::with('role')->latest();
-            
+            Log::info('Listing users with filters', request()->only(['search', 'role_id', 'status']));
             return $this->paginateResponse($query, UserResource::class);
             
             
@@ -170,7 +171,7 @@ class AuthService
     {
         return $this->trace(__FUNCTION__, function () use ($id, $status): User {
             $user = $this->findUserById($id);
-            
+            Log::info("Updating user ID {$id} status to {$status}");
             $user->update([
                 'status' => $status,
             ]);
@@ -187,6 +188,7 @@ class AuthService
             $user = $this->findUserById($id);
             
             if ($actor && $actor->id === $user->id) {
+                Log::warning("User ID {$actor->id} attempted to delete their own account.");
                 throw new ApiException(ResponseStatus::BAD_REQUEST, 'You cannot delete your own account.');
             }
             
@@ -201,11 +203,24 @@ class AuthService
         return $this->trace(__FUNCTION__, function () use ($username, $password, $ip, $userAgent): array {
             $user = User::where('username', $username)->first();
             
-            if (!$user || !Hash::check($password, (string) $user->password_hash)) {
+            if (!$user) {
+                Log::warning('Failed login attempt: account not found.', [
+                    'username' => $username,
+                    'ip' => $ip,
+                ]);
                 throw new AuthenticationException('account not exist');
+            }
+
+            if (!Hash::check($password, (string) $user->password_hash)) {
+                Log::warning('Failed login attempt: account is not correct.', [
+                    'username' => $username,
+                    'ip' => $ip,
+                ]);
+                throw new AuthenticationException('account is not correct');
             }
             
             if ($user->status !== 'Active') {
+                Log::warning("Login attempt for inactive user: {$username}");
                 throw new AuthorizationException('Account is inactive.');
             }
             
@@ -221,12 +236,14 @@ class AuthService
             $token = $this->getRefreshTokenRecord($refreshToken);
             
             if (!$token || $token->isExpired() || $token->isRevoked()) {
+                Log::warning("Invalid refresh token attempt from IP {$ip}");
                 throw new AuthenticationException('Invalid refresh token.');
             }
             
             $user = $token->user;
             
             if (!$user || $user->status !== 'Active') {
+                Log::warning("Refresh token used for inactive user: {$user->username}");
                 throw new AuthorizationException('Account is inactive.');
             }
             
@@ -236,6 +253,7 @@ class AuthService
                 $token->last_used_at = now();
                 $token->save();
             
+
                 return $this->issueTokens($user, $ip, $userAgent);
             });
             
@@ -248,6 +266,7 @@ class AuthService
         $this->trace(__FUNCTION__, function () use ($user, $refreshToken) {
             if ($refreshToken) {
                 $this->revokeRefreshToken($user, $refreshToken);
+                Log::info("User ID {$user->id} logged out with refresh token revoked.");
             }
             
             
@@ -257,12 +276,18 @@ class AuthService
     public function logoutAll(User $user): int
     {
         return $this->trace(__FUNCTION__, function () use ($user): int {
-            return RefreshToken::where('user_id', $user->id)
+            $updated = RefreshToken::where('user_id', $user->id)
                 ->whereNull('revoked_at')
                 ->update([
                     'revoked_at' => now(),
                     'last_used_at' => now(),
                 ]);
+
+            Log::info("User ID {$user->id} logged out from all sessions, all refresh tokens revoked.", [
+                'revoked_tokens' => $updated,
+            ]);
+
+            return $updated;
             
             
         });
@@ -293,6 +318,9 @@ class AuthService
             $revoked = $this->revokeRefreshToken($user, $refreshToken);
             
             if (!$revoked) {
+                Log::warning('User revoke refresh token failed: token not found.', [
+                    'user_id' => $user->id,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Refresh token not found.');
             }
             
@@ -405,6 +433,7 @@ class AuthService
         $user = User::with('role')->find($id);
 
         if (!$user) {
+            Log::warning('User not found.', ['id' => $id]);
             throw new ApiException(ResponseStatus::NOT_FOUND, 'User not found.');
         }
 
@@ -412,26 +441,131 @@ class AuthService
     }
 
     /**
-     * Upload a user image.
-     * Tries Cloudinary first; falls back to local storage if Cloudinary is not configured.
+     * Upload a user image to Cloudinary only.
      */
-    private function uploadImage(\Illuminate\Http\UploadedFile $file): ?string
+    private function uploadImage(\Illuminate\Http\UploadedFile $file): string
     {
-        // Try Cloudinary first
+        $this->ensureCloudinaryConfigured();
+        $uploadOptions = $this->buildCloudinaryUploadOptions('users');
+
         try {
-            return \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload($file->getRealPath(), [
-                'folder' => 'users',
-                'upload_preset' => 'image'
-            ])->getSecurePath();
+            $url = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+                $file->getRealPath(),
+                $uploadOptions
+            )->getSecurePath();
         } catch (\Throwable $e) {
-            // Cloudinary not configured or failed Ã¢â‚¬â€œ fall back to local storage
-            Log::warning('Cloudinary upload failed, using local storage: ' . $e->getMessage());
+            Log::error(
+                'User image upload failed on Cloudinary.',
+                $this->buildCloudinaryExceptionContext($e, $file, $uploadOptions)
+            );
+
+            throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
         }
 
-        // Fallback: store locally in storage/app/public/users
-        $path = $file->store('users', 'public');
+        if (!$url) {
+            Log::error('User image upload failed: Cloudinary returned empty URL.');
+            throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
+        }
 
-        return $path ? '/storage/' . $path : null;
+        return $url;
+    }
+
+    private function ensureCloudinaryConfigured(): void
+    {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+
+        if ($cloudUrl === '' || str_contains($cloudUrl, 'API_KEY:API_SECRET@CLOUD_NAME')) {
+            Log::error('Cloudinary is not configured for user uploads. Set CLOUDINARY_URL in .env and clear config cache.');
+            throw new ApiException(ResponseStatus::BAD_REQUEST, 'Cloudinary is not configured. Set CLOUDINARY_URL in .env.');
+        }
+    }
+
+    private function buildCloudinaryUploadOptions(string $folder): array
+    {
+        $options = ['folder' => $folder];
+        $preset = trim((string) config('cloudinary.upload_preset', ''));
+
+        if ($preset !== '') {
+            $options['upload_preset'] = $preset;
+        }
+
+        return $options;
+    }
+
+    private function buildCloudinaryExceptionContext(
+        \Throwable $e,
+        \Illuminate\Http\UploadedFile $file,
+        array $uploadOptions
+    ): array {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+        $context = [
+            'exception_class' => $e::class,
+            'exception_message' => $e->getMessage(),
+            'exception_code' => $e->getCode(),
+            'exception_file' => $e->getFile(),
+            'exception_line' => $e->getLine(),
+            'upload_original_name' => $file->getClientOriginalName(),
+            'upload_mime_type' => $file->getClientMimeType(),
+            'upload_size_bytes' => $file->getSize(),
+            'cloudinary_upload_options' => $uploadOptions,
+            'cloudinary_config_host' => parse_url($cloudUrl, PHP_URL_HOST) ?: null,
+            'cloudinary_config_has_url' => $cloudUrl !== '',
+            'cloudinary_config_has_upload_preset' => array_key_exists('upload_preset', $uploadOptions),
+        ];
+
+        if ($e->getPrevious() !== null) {
+            $context['previous_exception_class'] = $e->getPrevious()::class;
+            $context['previous_exception_message'] = $e->getPrevious()->getMessage();
+        }
+
+        $response = null;
+
+        if (method_exists($e, 'getResponse')) {
+            try {
+                $response = call_user_func([$e, 'getResponse']);
+            } catch (\Throwable $responseError) {
+                $context['cloudinary_response_inspect_error'] = $responseError->getMessage();
+            }
+        }
+
+        if ($response !== null) {
+            if (method_exists($response, 'getStatusCode')) {
+                $context['cloudinary_response_status'] = $response->getStatusCode();
+            }
+
+            if (method_exists($response, 'getHeaderLine')) {
+                $context['cloudinary_response_content_type'] = $response->getHeaderLine('Content-Type');
+            }
+
+            if (method_exists($response, 'getBody')) {
+                $body = (string) $response->getBody();
+
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_status', $context) && method_exists($e, 'getHttpCode')) {
+            try {
+                $context['cloudinary_response_status'] = call_user_func([$e, 'getHttpCode']);
+            } catch (\Throwable) {
+                // Ignore optional status extraction failures.
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_body_excerpt', $context) && method_exists($e, 'getHttpBody')) {
+            try {
+                $body = (string) call_user_func([$e, 'getHttpBody']);
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            } catch (\Throwable) {
+                // Ignore optional body extraction failures.
+            }
+        }
+
+        return $context;
     }
 }
 

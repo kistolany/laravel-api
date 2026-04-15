@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Address\CommuneResource;
 use App\Models\Commune;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 class CommuneService extends BaseService
@@ -32,6 +33,7 @@ class CommuneService extends BaseService
             $commune = Commune::find($id);
             
             if (!$commune) {
+                Log::warning('Commune not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Commune not found.");
             }
             
@@ -57,6 +59,7 @@ class CommuneService extends BaseService
             $commune = $this->findById($id);
             if (!isset($data['district_id'])) {
                 $data['district_id'] = $commune->district_id;
+                Log::info("Using existing district ID for commune: {$commune->id}");
             }
             $validatedData = $this->validateExisting($data, $commune->id);
             $commune->update($validatedData);
@@ -70,9 +73,17 @@ class CommuneService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($id): bool {
             $commune = $this->findById($id);
-            return $commune->delete();
-            
-            
+
+            $deleted = $commune->delete();
+
+            if (!$deleted) {
+                Log::error('Failed to delete commune.', ['id' => $id]);
+                return false;
+            }
+
+            Log::info('Commune deleted successfully.', ['id' => $id]);
+
+            return true;
         });
     }
 
@@ -92,9 +103,21 @@ class CommuneService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name')
+                ?: $validator->errors()->first('district_id')
+                ?: 'Validation failed for commune data.';
+
+            Log::warning('Commune validation failed.', [
+                'district_id' => $districtId,
+                'name' => $data['name'] ?? null,
+                'ignore_id' => $ignoreId,
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "The commune name already exists in this district.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

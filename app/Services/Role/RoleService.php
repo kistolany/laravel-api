@@ -7,6 +7,7 @@ use App\Exceptions\ApiException;
 use App\Models\Permission;
 use App\Models\Role;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use App\Services\Concerns\ServiceTraceable;
 class RoleService
 {
@@ -41,6 +42,7 @@ class RoleService
             $role = Role::with('permissions')->find($id);
             
             if (!$role) {
+                Log::warning('Role not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Role not found.');
             }
             
@@ -72,6 +74,7 @@ class RoleService
             $role = Role::find($id);
             
             if (!$role) {
+                Log::warning('Role delete failed: not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Role not found.');
             }
             
@@ -87,6 +90,7 @@ class RoleService
             $role = Role::find($roleId);
             
             if (!$role) {
+                Log::warning('Assign permissions failed: role not found.', ['role_id' => $roleId]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Role not found.');
             }
             
@@ -95,6 +99,10 @@ class RoleService
             $missing = array_values(array_diff($permissionIds, $existingIds));
             
             if (!empty($missing)) {
+                Log::warning('Assign permissions failed: missing permission ids.', [
+                    'role_id' => $roleId,
+                    'missing_permission_ids' => $missing,
+                ]);
                 throw new ApiException(
                     ResponseStatus::NOT_FOUND,
                     'Permission not found.',
@@ -113,6 +121,10 @@ class RoleService
             $notAttached = array_values(array_diff($permissionIds, $attachedIds));
             
             if (!empty($notAttached)) {
+                Log::warning('Assign permissions failed: permissions not attached.', [
+                    'role_id' => $roleId,
+                    'not_assigned_permission_ids' => $notAttached,
+                ]);
                 throw new ApiException(
                     ResponseStatus::BAD_REQUEST,
                     'Failed to assign some permissions to role.',
@@ -138,6 +150,9 @@ class RoleService
             }
             
             if (empty($permissionIds)) {
+                Log::warning('Permission assignment payload invalid: empty permissions.', [
+                    'payload_keys' => array_keys($data),
+                ]);
                 throw new ApiException(ResponseStatus::BAD_REQUEST, 'permission_ids or permissions is required.');
             }
             

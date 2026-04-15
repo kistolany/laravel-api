@@ -22,6 +22,7 @@ use App\Http\Controllers\ApiController\Student\StudentRegistrationController;
 use App\Http\Controllers\ApiController\Subject\SubjectController;
 use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
+use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -101,6 +102,7 @@ Route::prefix('v1')->group(function () {
             'destroy' => 'permission:student.delete',
         ]);
         Route::patch('students/{id}/disable', [StudentController::class, 'setDisable'])->middleware('permission:student.disable');
+        Route::patch('students/{id}/status', [StudentController::class, 'updateStatus'])->middleware('permission:student.status.update');
         Route::patch('students/{id}/student-type', [StudentController::class, 'updateStudentType'])->middleware('permission:student.update');
         Route::post('students/{id}/image', [StudentController::class, 'updateImage'])->middleware('permission:student.image.update');
         Route::get('students/{id}/classes', [StudentController::class, 'classes'])->middleware('permission:student.classes.view');
@@ -118,6 +120,14 @@ Route::prefix('v1')->group(function () {
         Route::post('classes/{id}/students', [ClassController::class, 'addStudent'])->middleware('permission:class.students.add');
         Route::post('classes/{id}/students/by-major', [ClassController::class, 'addStudentsByMajor'])->middleware('permission:class.students.add_by_major');
         Route::post('classes/{id}/subjects', [ClassController::class, 'assignSubject'])->middleware('permission:class.subjects.assign');
+
+        // Class Schedule routes
+        Route::get('class-schedules', [ClassScheduleController::class, 'index'])->middleware('permission:class_schedule.view');
+        Route::post('class-schedules', [ClassScheduleController::class, 'store'])->middleware('permission:class_schedule.create');
+        Route::get('class-schedules/class/{classId}', [ClassScheduleController::class, 'byClass'])->middleware('permission:class_schedule.view');
+        Route::get('class-schedules/{id}', [ClassScheduleController::class, 'show'])->middleware('permission:class_schedule.view');
+        Route::put('class-schedules/{id}', [ClassScheduleController::class, 'update'])->middleware('permission:class_schedule.update');
+        Route::delete('class-schedules/{id}', [ClassScheduleController::class, 'destroy'])->middleware('permission:class_schedule.delete');
 
         // Attendance routes
         Route::get('attendance-sessions/major/{majorId}', [AttendanceSessionController::class, 'byMajor'])->middleware('permission:attendance.view');

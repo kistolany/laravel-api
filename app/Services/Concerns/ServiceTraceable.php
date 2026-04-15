@@ -9,11 +9,7 @@ trait ServiceTraceable
     protected function trace(string $method, callable $callback): mixed
     {
         $start = microtime(true);
-
-        Log::info('Service method started', [
-            'service' => static::class,
-            'method' => $method,
-        ]);
+        $slowThresholdMs = 250;
 
         try {
             return $callback();
@@ -27,11 +23,15 @@ trait ServiceTraceable
 
             throw $e;
         } finally {
-            Log::info('Service method finished', [
-                'service' => static::class,
-                'method' => $method,
-                'duration_ms' => round((microtime(true) - $start) * 1000, 2),
-            ]);
+            $durationMs = round((microtime(true) - $start) * 1000, 2);
+
+            if ($durationMs >= $slowThresholdMs) {
+                Log::warning('Slow service method', [
+                    'service' => static::class,
+                    'method' => $method,
+                    'duration_ms' => $durationMs,
+                ]);
+            }
         }
     }
 }

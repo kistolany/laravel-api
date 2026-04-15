@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Address\ProvinceResource;
 use App\Models\Province;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 class ProvinceService extends BaseService
@@ -31,6 +32,7 @@ class ProvinceService extends BaseService
             $province = Province::find($id);
             
             if (!$province) {
+                Log::warning('Province not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Province not found.");
             }
             
@@ -83,9 +85,19 @@ class ProvinceService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name')
+                ?: 'Validation failed for province data.';
+
+            Log::warning('Province validation failed.', [
+                'name' => $data['name'] ?? null,
+                'ignore_id' => $ignoreId,
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "The province name already exists.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

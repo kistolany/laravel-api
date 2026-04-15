@@ -89,6 +89,19 @@ class StudentController extends Controller
     }
 
     /**
+     * Update student status to enable or disable.
+     */
+    public function updateStatus($id)
+    {
+        $status = request()->validate([
+            'status' => 'required|in:enable,disable',
+        ])['status'];
+
+        $student = $this->service->setStatus($id, $status);
+        return $this->success(new StudentResource($student), "Student status updated to {$status}.");
+    }
+
+    /**
      * Update student type only.
      */
     public function updateStudentType(StudentTypeRequest $request, $id)

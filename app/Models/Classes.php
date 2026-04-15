@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -12,33 +11,8 @@ class Classes extends Model
     protected $table = 'classes';
 
     protected $fillable = [
-        'code',
-        'major_id',
-        'shift_id',
-        'academic_year',
-        'year_level',
-        'semester',
-        'section',
-        'max_students',
-        'is_active',
+        'name',
     ];
-
-    protected $casts = [
-        'year_level' => 'integer',
-        'semester' => 'integer',
-        'max_students' => 'integer',
-        'is_active' => 'boolean',
-    ];
-
-    public function major(): BelongsTo
-    {
-        return $this->belongsTo(Major::class, 'major_id');
-    }
-
-    public function shift(): BelongsTo
-    {
-        return $this->belongsTo(Shift::class, 'shift_id');
-    }
 
     public function classStudents(): HasMany
     {

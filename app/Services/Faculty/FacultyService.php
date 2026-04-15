@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Faculty\FacultyResource;
 use App\Models\Faculty;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 class FacultyService extends BaseService
 {
@@ -35,6 +36,7 @@ class FacultyService extends BaseService
             
             // validate if id null throw error
             if (!$faculty) {
+                Log::warning('Faculty not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Faculty not found.");
             }
             
@@ -103,11 +105,22 @@ class FacultyService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name_eg')
+                ?: $validator->errors()->first('name_kh')
+                ?: 'Validation failed for faculty data.';
+
+            Log::warning('Faculty validation failed.', [
+                'ignore_id' => $ignoreId,
+                'name_eg' => $data['name_eg'] ?? null,
+                'name_kh' => $data['name_kh'] ?? null,
+                'errors' => $errors,
+            ]);
 
             // call api exception for throw
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "The faculty name already exists.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

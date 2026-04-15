@@ -1,4 +1,4 @@
-FROM php:8.2-cli-alpine
+FROM php:8.2-fpm-alpine
 
 # 1. Install system dependencies & PHP extensions
 RUN apk add --no-cache \
@@ -22,7 +22,11 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     exif \
     gd \
     intl \
-    zip
+    zip \
+    opcache
+
+# Runtime tuning for faster local API responses
+COPY docker/php/performance.ini /usr/local/etc/php/conf.d/performance.ini
 
 # 2. Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -35,7 +39,7 @@ COPY . .
 RUN composer install --no-interaction --optimize-autoloader
 
 # 5. Expose Port 8000
-EXPOSE 8000
+EXPOSE 9000
 
-# 6. Start the API server
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+# 6. Start PHP-FPM for Nginx upstream
+CMD ["php-fpm", "-F"]

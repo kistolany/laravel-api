@@ -3,12 +3,14 @@
 namespace App\Services\Major;
 
 use App\Services\BaseService;
+use App\Services\Faculty\FacultyService;
 
 use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Major\MajorResource;
 use App\Models\Major;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 class MajorService extends BaseService
 {
@@ -59,6 +61,7 @@ class MajorService extends BaseService
             
             // validate if id null throw error
             if (!$subject) {
+                Log::warning('Major not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Major not found.");
             }
             
@@ -141,11 +144,23 @@ class MajorService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('name_eg')
+                ?: $validator->errors()->first('name_kh')
+                ?: 'Validation failed for major data.';
+
+            Log::warning('Major validation failed.', [
+                'faculty_id' => $facultyId,
+                'ignore_id' => $ignoreId,
+                'name_eg' => $data['name_eg'] ?? null,
+                'name_kh' => $data['name_kh'] ?? null,
+                'errors' => $errors,
+            ]);
 
             // call api exception for throw
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "The major name already exists in this faculty.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }

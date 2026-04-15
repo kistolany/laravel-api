@@ -14,7 +14,7 @@ class ClassBulkStudentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'major_id' => 'nullable|exists:majors,id',
+            'major_id' => 'required|exists:majors,id',
             'joined_date' => 'nullable|date',
             'left_date' => 'nullable|date',
             'status' => 'nullable|in:Active,Suspended,Graduated,Dropped',

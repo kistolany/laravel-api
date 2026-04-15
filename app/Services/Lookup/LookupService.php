@@ -13,6 +13,7 @@ use App\Models\MajorSubject;
 use App\Models\Province;
 use App\Models\Shift;
 use App\Models\Subject;
+use Illuminate\Support\Facades\Cache;
 class LookupService extends BaseService
 {
     /**
@@ -21,10 +22,9 @@ class LookupService extends BaseService
     public function getFaculties()
     {
         return $this->trace(__FUNCTION__, function () {
-            // Make sure the method name matches: getFaculties
-            return Faculty::select('id', 'name_eg', 'name_kh')
+            return $this->rememberLookup(__FUNCTION__, [], fn () => Faculty::select('id', 'name_eg', 'name_kh')
                 ->orderBy('name_eg')
-                ->get();
+                ->get());
             
             
         });
@@ -38,11 +38,11 @@ class LookupService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($facultyId) {
             $facultyId = $this->toNullableInt($facultyId);
             
-            return Major::query()
-                ->when(!is_null($facultyId), fn($query) => $query->where('faculty_id', $facultyId))
+            return $this->rememberLookup(__FUNCTION__, ['faculty_id' => $facultyId], fn () => Major::query()
+                ->when(!is_null($facultyId), fn ($query) => $query->where('faculty_id', $facultyId))
                 ->select('id', 'name_eg', 'name_kh')
                 ->orderBy('name_eg')
-                ->get();
+                ->get());
             
             
         });
@@ -51,9 +51,9 @@ class LookupService extends BaseService
     public function getProvinces()
     {
         return $this->trace(__FUNCTION__, function () {
-            return Province::select('id', 'name')
+            return $this->rememberLookup(__FUNCTION__, [], fn () => Province::select('id', 'name')
                 ->orderBy('name')
-                ->get();
+                ->get());
             
             
         });
@@ -68,10 +68,10 @@ class LookupService extends BaseService
                 return collect();
             }
             
-            return District::where('province_id', $provinceId)
+            return $this->rememberLookup(__FUNCTION__, ['province_id' => $provinceId], fn () => District::where('province_id', $provinceId)
                 ->select('id', 'name', 'province_id')
                 ->orderBy('name')
-                ->get();
+                ->get());
             
             
         });
@@ -86,10 +86,10 @@ class LookupService extends BaseService
                 return collect();
             }
             
-            return Commune::where('district_id', $districtId)
+            return $this->rememberLookup(__FUNCTION__, ['district_id' => $districtId], fn () => Commune::where('district_id', $districtId)
                 ->select('id', 'name', 'district_id')
                 ->orderBy('name')
-                ->get();
+                ->get());
             
             
         });
@@ -100,7 +100,7 @@ class LookupService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($majorId) {
             $majorId = $this->toNullableInt($majorId);
             
-            return Subject::query()
+            return $this->rememberLookup(__FUNCTION__, ['major_id' => $majorId], fn () => Subject::query()
                 ->when(!is_null($majorId), function ($query) use ($majorId) {
                     $query->whereIn(
                         'id',
@@ -111,7 +111,7 @@ class LookupService extends BaseService
                 })
                 ->select('id', 'subject_Code', 'name_eg', 'name_kh')
                 ->orderBy('name_eg')
-                ->get();
+                ->get());
             
             
         });
@@ -120,10 +120,10 @@ class LookupService extends BaseService
     public function getShifts()
     {
         return $this->trace(__FUNCTION__, function () {
-            return Shift::query()
+            return $this->rememberLookup(__FUNCTION__, [], fn () => Shift::query()
                 ->select('id', 'name_en', 'name_kh', 'time_range')
                 ->orderBy('name_en')
-                ->get();
+                ->get());
             
             
         });
@@ -135,12 +135,15 @@ class LookupService extends BaseService
             $majorId = $this->toNullableInt($majorId);
             $shiftId = $this->toNullableInt($shiftId);
             
-            return Classes::query()
-                ->when(!is_null($majorId), fn($query) => $query->where('major_id', $majorId))
-                ->when(!is_null($shiftId), fn($query) => $query->where('shift_id', $shiftId))
+            return $this->rememberLookup(__FUNCTION__, [
+                'major_id' => $majorId,
+                'shift_id' => $shiftId,
+            ], fn () => Classes::query()
+                ->when(!is_null($majorId), fn ($query) => $query->where('major_id', $majorId))
+                ->when(!is_null($shiftId), fn ($query) => $query->where('shift_id', $shiftId))
                 ->select('id', 'code', 'major_id', 'shift_id', 'academic_year', 'year_level', 'semester', 'section', 'is_active')
                 ->orderBy('code')
-                ->get();
+                ->get());
             
             
         });
@@ -174,7 +177,13 @@ class LookupService extends BaseService
             $districtId = $this->toNullableInt($districtId);
             $shiftId = $this->toNullableInt($shiftId);
             
-            return [
+            return $this->rememberLookup(__FUNCTION__, [
+                'faculty_id' => $facultyId,
+                'major_id' => $majorId,
+                'province_id' => $provinceId,
+                'district_id' => $districtId,
+                'shift_id' => $shiftId,
+            ], fn (): array => [
                 'faculties' => $this->getFaculties(),
                 'majors' => $this->getMajorsByFaculty($facultyId),
                 'subjects' => $this->getSubjectsByMajor($majorId),
@@ -184,10 +193,30 @@ class LookupService extends BaseService
                 'shifts' => $this->getShifts(),
                 'classes' => $this->getClasses($majorId, $shiftId),
                 'student_types' => $this->getStudentTypes(),
-            ];
+            ]);
             
             
         });
+    }
+
+    private function rememberLookup(string $name, array $params, callable $callback): mixed
+    {
+        if (!config('cache.lookup.enabled', true)) {
+            return $callback();
+        }
+
+        $ttlSeconds = max(30, (int) config('cache.lookup.ttl_seconds', 300));
+        $key = $this->lookupCacheKey($name, $params);
+
+        return Cache::remember($key, now()->addSeconds($ttlSeconds), $callback);
+    }
+
+    private function lookupCacheKey(string $name, array $params): string
+    {
+        ksort($params);
+        $payload = json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return 'lookup:' . $name . ':' . sha1((string) $payload);
     }
 
     private function toNullableInt(mixed $value): ?int

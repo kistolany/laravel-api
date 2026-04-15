@@ -11,6 +11,7 @@ use App\Http\Resources\Student\StudentResource;
 use App\Models\Students;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -67,7 +68,10 @@ class StudentService extends BaseService
                 });
             });
             
-            // 7. Final Sort and Paginate
+            // 7. Filter by Status (default: only show enabled students)
+            $query->where('status', 'enable');
+
+            // 8. Final Sort and Paginate
             return $this->paginateResponse($query->latest(), StudentResource::class);
             
             
@@ -87,6 +91,7 @@ class StudentService extends BaseService
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'classes',
             ])->whereIn('student_type', ['PAY', 'PASS']);
             
             return $this->paginateResponse($query->latest(), StudentResource::class);
@@ -111,6 +116,7 @@ class StudentService extends BaseService
             ])->find($id);
             
             if (!$student) {
+                Log::warning('Student not found.', ['id' => $id]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Student with ID :$id not found.");
             }
             
@@ -292,9 +298,29 @@ class StudentService extends BaseService
         ]);
 
         if ($validator->fails()) {
+            $errors = $validator->errors()->toArray();
+            $message = $validator->errors()->first('email')
+                ?: $validator->errors()->first('id_card_number')
+                ?: $validator->errors()->first('major_id')
+                ?: $validator->errors()->first('shift_id')
+                ?: 'Validation failed for student data.';
+
+            Log::warning('Student validation failed.', [
+                'ignore_id' => $ignoreId,
+                'data' => [
+                    'email' => $data['email'] ?? null,
+                    'id_card_number' => $data['id_card_number'] ?? null,
+                    'major_id' => $data['major_id'] ?? null,
+                    'shift_id' => $data['shift_id'] ?? null,
+                    'batch_year' => $data['batch_year'] ?? null,
+                    'student_type' => $data['student_type'] ?? null,
+                ],
+                'errors' => $errors,
+            ]);
+
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
-                "Validation failed for student data.",
+                $message,
                 data: ['errors' => $validator->errors()]
             );
         }
@@ -391,11 +417,28 @@ class StudentService extends BaseService
             if ($oldPath && !str_contains($oldPath, 'res.cloudinary.com')) {
                 Storage::disk('public')->delete($oldPath);
             }
-            
-            $uploadedFileUrl = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload($file->getRealPath(), [
-                'folder' => 'students',
-                'upload_preset' => 'images'
-            ])->getSecurePath();
+
+            $this->ensureCloudinaryConfigured();
+            $uploadOptions = $this->buildCloudinaryUploadOptions('students');
+
+            try {
+                $uploadedFileUrl = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+                    $file->getRealPath(),
+                    $uploadOptions
+                )->getSecurePath();
+            } catch (\Throwable $e) {
+                Log::error(
+                    'Student image upload failed on Cloudinary.',
+                    $this->buildCloudinaryExceptionContext($e, $file, $uploadOptions)
+                );
+
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
+            }
+
+            if (!$uploadedFileUrl) {
+                Log::error('Student image upload failed: Cloudinary returned empty URL.');
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
+            }
             
             $validatedData['image'] = $uploadedFileUrl;
             return $validatedData;
@@ -403,6 +446,104 @@ class StudentService extends BaseService
 
         unset($validatedData['image']);
         return $validatedData;
+    }
+
+    private function ensureCloudinaryConfigured(): void
+    {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+
+        if ($cloudUrl === '' || str_contains($cloudUrl, 'API_KEY:API_SECRET@CLOUD_NAME')) {
+            Log::error('Cloudinary is not configured for student uploads. Set CLOUDINARY_URL in .env and clear config cache.');
+            throw new ApiException(ResponseStatus::BAD_REQUEST, 'Cloudinary is not configured. Set CLOUDINARY_URL in .env.');
+        }
+    }
+
+    private function buildCloudinaryUploadOptions(string $folder): array
+    {
+        $options = ['folder' => $folder];
+        $preset = trim((string) config('cloudinary.upload_preset', ''));
+
+        if ($preset !== '') {
+            $options['upload_preset'] = $preset;
+        }
+
+        return $options;
+    }
+
+    private function buildCloudinaryExceptionContext(
+        \Throwable $e,
+        UploadedFile $file,
+        array $uploadOptions
+    ): array {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+        $context = [
+            'exception_class' => $e::class,
+            'exception_message' => $e->getMessage(),
+            'exception_code' => $e->getCode(),
+            'exception_file' => $e->getFile(),
+            'exception_line' => $e->getLine(),
+            'upload_original_name' => $file->getClientOriginalName(),
+            'upload_mime_type' => $file->getClientMimeType(),
+            'upload_size_bytes' => $file->getSize(),
+            'cloudinary_upload_options' => $uploadOptions,
+            'cloudinary_config_host' => parse_url($cloudUrl, PHP_URL_HOST) ?: null,
+            'cloudinary_config_has_url' => $cloudUrl !== '',
+            'cloudinary_config_has_upload_preset' => array_key_exists('upload_preset', $uploadOptions),
+        ];
+
+        if ($e->getPrevious() !== null) {
+            $context['previous_exception_class'] = $e->getPrevious()::class;
+            $context['previous_exception_message'] = $e->getPrevious()->getMessage();
+        }
+
+        $response = null;
+
+        if (method_exists($e, 'getResponse')) {
+            try {
+                $response = call_user_func([$e, 'getResponse']);
+            } catch (\Throwable $responseError) {
+                $context['cloudinary_response_inspect_error'] = $responseError->getMessage();
+            }
+        }
+
+        if ($response !== null) {
+            if (method_exists($response, 'getStatusCode')) {
+                $context['cloudinary_response_status'] = $response->getStatusCode();
+            }
+
+            if (method_exists($response, 'getHeaderLine')) {
+                $context['cloudinary_response_content_type'] = $response->getHeaderLine('Content-Type');
+            }
+
+            if (method_exists($response, 'getBody')) {
+                $body = (string) $response->getBody();
+
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_status', $context) && method_exists($e, 'getHttpCode')) {
+            try {
+                $context['cloudinary_response_status'] = call_user_func([$e, 'getHttpCode']);
+            } catch (\Throwable) {
+                // Ignore optional status extraction failures.
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_body_excerpt', $context) && method_exists($e, 'getHttpBody')) {
+            try {
+                $body = (string) call_user_func([$e, 'getHttpBody']);
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            } catch (\Throwable) {
+                // Ignore optional body extraction failures.
+            }
+        }
+
+        return $context;
     }
 }
 

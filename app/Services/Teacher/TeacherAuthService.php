@@ -14,8 +14,8 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 use App\Services\Concerns\ServiceTraceable;
 class TeacherAuthService
 {
@@ -68,10 +68,16 @@ class TeacherAuthService
             }
             
             if ($teacher->otp_code !== $otpCode) {
+                Log::warning('Teacher OTP verification failed: invalid code.', [
+                    'email' => strtolower($email),
+                ]);
                 throw new ApiException(ResponseStatus::BAD_REQUEST, 'Invalid OTP code.');
             }
             
             if (!$teacher->otp_expires_at || $teacher->otp_expires_at->isPast()) {
+                Log::warning('Teacher OTP verification failed: code expired.', [
+                    'email' => strtolower($email),
+                ]);
                 throw new ApiException(ResponseStatus::BAD_REQUEST, 'OTP code has expired.');
             }
             
@@ -94,6 +100,9 @@ class TeacherAuthService
             $teacher = $this->findTeacherByEmail($email);
             
             if ($teacher->is_verified) {
+                Log::warning('Teacher resend OTP rejected: account already verified.', [
+                    'email' => strtolower($email),
+                ]);
                 throw new ApiException(ResponseStatus::BAD_REQUEST, 'Teacher account is already verified.');
             }
             
@@ -121,6 +130,10 @@ class TeacherAuthService
                 ->first();
             
             if (!$teacher || !Hash::check($password, (string) $teacher->password)) {
+                Log::warning('Teacher login failed: account not found or password invalid.', [
+                    'login' => $login,
+                    'ip' => $ip,
+                ]);
                 throw new AuthenticationException('account not exist');
             }
             
@@ -136,12 +149,18 @@ class TeacherAuthService
             $token = $this->getRefreshTokenRecord($refreshToken);
             
             if (!$token || $token->isExpired() || $token->isRevoked()) {
+                Log::warning('Teacher refresh failed: invalid refresh token.', [
+                    'ip' => $ip,
+                ]);
                 throw new AuthenticationException('Invalid refresh token.');
             }
             
             $teacher = $token->teacher;
             
             if (!$teacher) {
+                Log::warning('Teacher refresh failed: teacher not found.', [
+                    'ip' => $ip,
+                ]);
                 throw new AuthorizationException('Teacher account not found.');
             }
             
@@ -209,6 +228,9 @@ class TeacherAuthService
             $revoked = $this->revokeRefreshToken($teacher, $refreshToken);
             
             if (!$revoked) {
+                Log::warning('Teacher revoke refresh token failed: token not found.', [
+                    'teacher_id' => $teacher->id,
+                ]);
                 throw new ApiException(ResponseStatus::NOT_FOUND, 'Refresh token not found.');
             }
             
@@ -265,6 +287,9 @@ class TeacherAuthService
         $teacher = Teacher::where('email', strtolower($email))->first();
 
         if (!$teacher) {
+            Log::warning('Teacher lookup by email failed: not found.', [
+                'email' => strtolower($email),
+            ]);
             throw new ApiException(ResponseStatus::NOT_FOUND, 'Teacher not found.');
         }
 
@@ -288,17 +313,32 @@ class TeacherAuthService
         return max((int) config('teacher_auth.otp_ttl', 600), 300);
     }
 
-    public function uploadImage(UploadedFile $file): ?string
+    public function uploadImage(UploadedFile $file): string
     {
-        return $this->trace(__FUNCTION__, function () use ($file): ?string {
+        return $this->trace(__FUNCTION__, function () use ($file): string {
+            $this->ensureCloudinaryConfigured();
+            $uploadOptions = $this->buildCloudinaryUploadOptions('teachers');
+
             try {
-                return \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload($file->getRealPath(), [
-                    'folder' => 'teachers',
-                    'upload_preset' => 'image',
-                ])->getSecurePath();
+                $url = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+                    $file->getRealPath(),
+                    $uploadOptions
+                )->getSecurePath();
             } catch (\Throwable $e) {
-                return $file->store('teacher-images', 'public');
+                Log::error(
+                    'Teacher image upload failed on Cloudinary.',
+                    $this->buildCloudinaryExceptionContext($e, $file, $uploadOptions)
+                );
+
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
             }
+
+            if (!$url) {
+                Log::error('Teacher image upload failed: Cloudinary returned empty URL.');
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload image.');
+            }
+
+            return $url;
             
             
         });
@@ -306,17 +346,7 @@ class TeacherAuthService
 
     public function uploadImageOrFail(UploadedFile $file): string
     {
-        return $this->trace(__FUNCTION__, function () use ($file): string {
-            $url = $this->uploadImage($file);
-            
-            if (!$url) {
-                throw new ApiException(ResponseStatus::BAD_REQUEST, 'Failed to upload image.');
-            }
-            
-            return $url;
-            
-            
-        });
+        return $this->uploadImage($file);
     }
 
     private function storeImage(mixed $image): ?string
@@ -329,14 +359,105 @@ class TeacherAuthService
             return null;
         }
 
-        try {
-            return \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload($image->getRealPath(), [
-                'folder' => 'teachers',
-                'upload_preset' => 'image',
-            ])->getSecurePath();
-        } catch (\Throwable $e) {
-            return $image->store('teacher-images', 'public');
+        return $this->uploadImage($image);
+    }
+
+    private function ensureCloudinaryConfigured(): void
+    {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+
+        if ($cloudUrl === '' || str_contains($cloudUrl, 'API_KEY:API_SECRET@CLOUD_NAME')) {
+            Log::error('Cloudinary is not configured for teacher uploads. Set CLOUDINARY_URL in .env and clear config cache.');
+            throw new ApiException(ResponseStatus::BAD_REQUEST, 'Cloudinary is not configured. Set CLOUDINARY_URL in .env.');
         }
+    }
+
+    private function buildCloudinaryUploadOptions(string $folder): array
+    {
+        $options = ['folder' => $folder];
+        $preset = trim((string) config('cloudinary.upload_preset', ''));
+
+        if ($preset !== '') {
+            $options['upload_preset'] = $preset;
+        }
+
+        return $options;
+    }
+
+    private function buildCloudinaryExceptionContext(
+        \Throwable $e,
+        UploadedFile $file,
+        array $uploadOptions
+    ): array {
+        $cloudUrl = (string) config('cloudinary.cloud_url', '');
+        $context = [
+            'exception_class' => $e::class,
+            'exception_message' => $e->getMessage(),
+            'exception_code' => $e->getCode(),
+            'exception_file' => $e->getFile(),
+            'exception_line' => $e->getLine(),
+            'upload_original_name' => $file->getClientOriginalName(),
+            'upload_mime_type' => $file->getClientMimeType(),
+            'upload_size_bytes' => $file->getSize(),
+            'cloudinary_upload_options' => $uploadOptions,
+            'cloudinary_config_host' => parse_url($cloudUrl, PHP_URL_HOST) ?: null,
+            'cloudinary_config_has_url' => $cloudUrl !== '',
+            'cloudinary_config_has_upload_preset' => array_key_exists('upload_preset', $uploadOptions),
+        ];
+
+        if ($e->getPrevious() !== null) {
+            $context['previous_exception_class'] = $e->getPrevious()::class;
+            $context['previous_exception_message'] = $e->getPrevious()->getMessage();
+        }
+
+        $response = null;
+
+        if (method_exists($e, 'getResponse')) {
+            try {
+                $response = call_user_func([$e, 'getResponse']);
+            } catch (\Throwable $responseError) {
+                $context['cloudinary_response_inspect_error'] = $responseError->getMessage();
+            }
+        }
+
+        if ($response !== null) {
+            if (method_exists($response, 'getStatusCode')) {
+                $context['cloudinary_response_status'] = $response->getStatusCode();
+            }
+
+            if (method_exists($response, 'getHeaderLine')) {
+                $context['cloudinary_response_content_type'] = $response->getHeaderLine('Content-Type');
+            }
+
+            if (method_exists($response, 'getBody')) {
+                $body = (string) $response->getBody();
+
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_status', $context) && method_exists($e, 'getHttpCode')) {
+            try {
+                $context['cloudinary_response_status'] = call_user_func([$e, 'getHttpCode']);
+            } catch (\Throwable) {
+                // Ignore optional status extraction failures.
+            }
+        }
+
+        if (!array_key_exists('cloudinary_response_body_excerpt', $context) && method_exists($e, 'getHttpBody')) {
+            try {
+                $body = (string) call_user_func([$e, 'getHttpBody']);
+                if ($body !== '') {
+                    $context['cloudinary_response_body_excerpt'] = substr($body, 0, 500);
+                }
+            } catch (\Throwable) {
+                // Ignore optional body extraction failures.
+            }
+        }
+
+        return $context;
     }
 }
 
