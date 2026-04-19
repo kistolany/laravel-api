@@ -8,14 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 class Faculty extends Model
 {
     use HasFactory;
-    protected $fillable = ['name_kh', 'name_eg'];
+    protected $fillable = ['name'];
 
+    public function majors()
+    {
+        return $this->hasMany(Major::class);
+    }
 
     public function scopeSearch($query, $term)
     {
-        return $query->where(function ($q) use ($term) {
-            $q->where('name_kh', 'like', "%{$term}%")
-                ->orWhere('name_eg', 'like', "%{$term}%");
-        });
+        return $query->where('name', 'like', "%{$term}%");
     }
 }

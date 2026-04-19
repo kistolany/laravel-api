@@ -21,8 +21,12 @@ class FacultyController extends Controller
 
     public function index()
     {
-        // call FacultyService and return success trait
         return $this->success($this->service->index());
+    }
+
+    public function tree()
+    {
+        return $this->success($this->service->tree());
     }
 
     public function store(FacultyRequest $request)

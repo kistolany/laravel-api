@@ -28,6 +28,47 @@ class FacultyService extends BaseService
         });
     }
 
+    /**
+     * Return the full faculty → major → subject hierarchy for the Academic tree UI.
+     */
+    public function tree(): array
+    {
+        $faculties = Faculty::with([
+            'majors.majorSubjects.subject',
+        ])->orderBy('name')->get();
+
+        return $faculties->map(function (Faculty $faculty) {
+            return [
+                'key'      => 'f-' . $faculty->id,
+                'id'       => $faculty->id,
+                'name'     => $faculty->name,
+                'level'    => 'faculty',
+                'children' => $faculty->majors->map(function ($major) {
+                    return [
+                        'key'      => 'm-' . $major->id,
+                        'id'       => $major->id,
+                        'name'     => $major->name,
+                        'level'    => 'major',
+                        'faculty'  => $major->faculty?->name,
+                        'faculty_id' => $major->faculty_id,
+                        'children' => $major->majorSubjects->map(function ($ms) {
+                            return [
+                                'key'        => 'ms-' . $ms->id,
+                                'id'         => $ms->id,
+                                'name'       => $ms->subject?->name ?? '',
+                                'subject_id' => $ms->subject_id,
+                                'level'      => 'subject',
+                                'year'       => $ms->year_level,
+                                'semester'   => $ms->semester,
+                                'major_id'   => $ms->major_id,
+                            ];
+                        })->values()->all(),
+                    ];
+                })->values()->all(),
+            ];
+        })->values()->all();
+    }
+
     public function findById(int $id): Faculty
     {
         return $this->trace(__FUNCTION__, function () use ($id): Faculty {
@@ -92,32 +133,22 @@ class FacultyService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = \Illuminate\Support\Facades\Validator::make($data, [
-            'name_kh' => [
-                'nullable',
-                'string',
-                Rule::unique('faculties', 'name_kh')->ignore($ignoreId),
-            ],
-            'name_eg' => [
+            'name' => [
                 'required',
                 'string',
-                Rule::unique('faculties', 'name_eg')->ignore($ignoreId),
+                Rule::unique('faculties', 'name')->ignore($ignoreId),
             ],
         ]);
 
         if ($validator->fails()) {
-            $errors = $validator->errors()->toArray();
-            $message = $validator->errors()->first('name_eg')
-                ?: $validator->errors()->first('name_kh')
-                ?: 'Validation failed for faculty data.';
+            $message = $validator->errors()->first('name') ?: 'Validation failed for faculty data.';
 
             Log::warning('Faculty validation failed.', [
                 'ignore_id' => $ignoreId,
-                'name_eg' => $data['name_eg'] ?? null,
-                'name_kh' => $data['name_kh'] ?? null,
-                'errors' => $errors,
+                'name'      => $data['name'] ?? null,
+                'errors'    => $validator->errors()->toArray(),
             ]);
 
-            // call api exception for throw
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
                 $message,

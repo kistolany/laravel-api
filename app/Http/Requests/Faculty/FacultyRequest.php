@@ -10,9 +10,7 @@ class FacultyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // We validate the ID from the URL parameter
-                'name_kh' => 'sometimes|nullable|string',
-            'name_eg' => 'sometimes|string',
+            'name' => 'sometimes|required|string',
         ];
     }
 

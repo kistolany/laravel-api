@@ -18,12 +18,11 @@ class MajorSubjectResource extends JsonResource
             // Getting data from the Subject relationship
             'subject_id'   => $this->subject_id,
             'subject_code' => $this->subject->subject_Code ?? null,
-            'name_kh'      => $this->subject->name_kh ?? null,
-            'name_eg'      => $this->subject->name_eg ?? null,
+            'name'         => $this->subject->name ?? null,
             
             // Getting data from the Major relationship
             'major_id'     => $this->major_id,
-            'major_name'   => $this->major->name_eg ?? null, 
+            'major_name'   => $this->major->name ?? null,
         ];
     }
 }

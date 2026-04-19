@@ -93,30 +93,25 @@ class SubjectService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $rules = [
-            'name_kh' => [
-                'string',
-                Rule::unique('faculties', 'name_kh')->ignore($ignoreId),
-            ],
-            'name_eg' => [
+            'name' => [
                 'required',
                 'string',
-                Rule::unique('faculties', 'name_eg')->ignore($ignoreId),
+                Rule::unique('subjects', 'name')->ignore($ignoreId),
             ],
+            'subject_Code' => ['nullable', 'string', 'max:50'],
         ];
 
         $validator = \Illuminate\Support\Facades\Validator::make($data, $rules);
 
         if ($validator->fails()) {
             $errors = $validator->errors()->toArray();
-            $message = $validator->errors()->first('name_eg')
-                ?: $validator->errors()->first('name_kh')
+            $message = $validator->errors()->first('name')
                 ?: 'Validation failed for subject data.';
 
             Log::warning('Subject validation failed.', [
                 'ignore_id' => $ignoreId,
-                'name_eg' => $data['name_eg'] ?? null,
-                'name_kh' => $data['name_kh'] ?? null,
-                'errors' => $errors,
+                'name'      => $data['name'] ?? null,
+                'errors'    => $errors,
             ]);
 
             // call api exception for throw

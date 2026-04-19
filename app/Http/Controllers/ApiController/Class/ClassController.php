@@ -39,16 +39,32 @@ class ClassController extends Controller
         return $this->success(new ClassResource($class));
     }
 
+    public function destroy($id)
+    {
+        $this->service->delete((int) $id);
+        return $this->success(null, "Class deleted successfully!");
+    }
+
     public function students($id)
     {
         $class = $this->service->findById($id, true);
-        return $this->success(ClassStudentResource::collection($class->students));
+        $class->students->load('academicInfo.major');
+        $className = $class->code ?? $class->name;
+        $collection = ClassStudentResource::collection($class->students);
+        $collection->each(fn($r) => $r->additional(['class_name' => $className]));
+        return $this->success($collection);
     }
 
     public function addStudent(ClassStudentRequest $request, $id)
     {
         $student = $this->service->addStudent($id, $request->all());
         return $this->success(new ClassStudentResource($student), "Student added to class successfully!");
+    }
+
+    public function removeStudent($id, $studentId)
+    {
+        $this->service->removeStudent((int) $id, $studentId);
+        return $this->success(null, "Student removed from class successfully!");
     }
 
     public function addStudentsByMajor(ClassBulkStudentRequest $request, $id)

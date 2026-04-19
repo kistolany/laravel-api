@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec *)",
+      "Bash(php artisan *)",
+      "Bash(grep -v \"^$\")"
+    ]
+  }
+}

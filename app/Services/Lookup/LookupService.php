@@ -13,6 +13,7 @@ use App\Models\MajorSubject;
 use App\Models\Province;
 use App\Models\Shift;
 use App\Models\Subject;
+use App\Models\Teacher;
 use Illuminate\Support\Facades\Cache;
 class LookupService extends BaseService
 {
@@ -21,12 +22,11 @@ class LookupService extends BaseService
      */
     public function getFaculties()
     {
-        return $this->trace(__FUNCTION__, function () {
-            return $this->rememberLookup(__FUNCTION__, [], fn () => Faculty::select('id', 'name_eg', 'name_kh')
-                ->orderBy('name_eg')
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn) {
+            return $this->rememberLookup($fn, [], fn () => Faculty::select('id', 'name')
+                ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
@@ -35,72 +35,63 @@ class LookupService extends BaseService
      */
     public function getMajorsByFaculty(mixed $facultyId = null)
     {
-        return $this->trace(__FUNCTION__, function () use ($facultyId) {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $facultyId) {
             $facultyId = $this->toNullableInt($facultyId);
-            
-            return $this->rememberLookup(__FUNCTION__, ['faculty_id' => $facultyId], fn () => Major::query()
+            return $this->rememberLookup($fn, ['faculty_id' => $facultyId], fn () => Major::query()
                 ->when(!is_null($facultyId), fn ($query) => $query->where('faculty_id', $facultyId))
-                ->select('id', 'name_eg', 'name_kh')
-                ->orderBy('name_eg')
+                ->select('id', 'name')
+                ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
     public function getProvinces()
     {
-        return $this->trace(__FUNCTION__, function () {
-            return $this->rememberLookup(__FUNCTION__, [], fn () => Province::select('id', 'name')
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn) {
+            return $this->rememberLookup($fn, [], fn () => Province::select('id', 'name')
                 ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
     public function getDistrictsByProvince(mixed $provinceId = null)
     {
-        return $this->trace(__FUNCTION__, function () use ($provinceId) {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $provinceId) {
             $provinceId = $this->toNullableInt($provinceId);
-            
             if ($provinceId === null) {
                 return collect();
             }
-            
-            return $this->rememberLookup(__FUNCTION__, ['province_id' => $provinceId], fn () => District::where('province_id', $provinceId)
+            return $this->rememberLookup($fn, ['province_id' => $provinceId], fn () => District::where('province_id', $provinceId)
                 ->select('id', 'name', 'province_id')
                 ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
     public function getCommunesByDistrict(mixed $districtId = null)
     {
-        return $this->trace(__FUNCTION__, function () use ($districtId) {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $districtId) {
             $districtId = $this->toNullableInt($districtId);
-            
             if ($districtId === null) {
                 return collect();
             }
-            
-            return $this->rememberLookup(__FUNCTION__, ['district_id' => $districtId], fn () => Commune::where('district_id', $districtId)
+            return $this->rememberLookup($fn, ['district_id' => $districtId], fn () => Commune::where('district_id', $districtId)
                 ->select('id', 'name', 'district_id')
                 ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
     public function getSubjectsByMajor(mixed $majorId = null)
     {
-        return $this->trace(__FUNCTION__, function () use ($majorId) {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $majorId) {
             $majorId = $this->toNullableInt($majorId);
-            
-            return $this->rememberLookup(__FUNCTION__, ['major_id' => $majorId], fn () => Subject::query()
+            return $this->rememberLookup($fn, ['major_id' => $majorId], fn () => Subject::query()
                 ->when(!is_null($majorId), function ($query) use ($majorId) {
                     $query->whereIn(
                         'id',
@@ -112,30 +103,27 @@ class LookupService extends BaseService
                 ->select('id', 'subject_Code', 'name_eg', 'name_kh')
                 ->orderBy('name_eg')
                 ->get());
-            
-            
         });
     }
 
     public function getShifts()
     {
-        return $this->trace(__FUNCTION__, function () {
-            return $this->rememberLookup(__FUNCTION__, [], fn () => Shift::query()
-                ->select('id', 'name_en', 'name_kh', 'time_range')
-                ->orderBy('name_en')
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn) {
+            return $this->rememberLookup($fn, [], fn () => Shift::query()
+                ->select('id', 'name', 'time_range')
+                ->orderBy('name')
                 ->get());
-            
-            
         });
     }
 
     public function getClasses(mixed $majorId = null, mixed $shiftId = null)
     {
-        return $this->trace(__FUNCTION__, function () use ($majorId, $shiftId) {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $majorId, $shiftId) {
             $majorId = $this->toNullableInt($majorId);
             $shiftId = $this->toNullableInt($shiftId);
-            
-            return $this->rememberLookup(__FUNCTION__, [
+            return $this->rememberLookup($fn, [
                 'major_id' => $majorId,
                 'shift_id' => $shiftId,
             ], fn () => Classes::query()
@@ -144,22 +132,82 @@ class LookupService extends BaseService
                 ->select('id', 'code', 'major_id', 'shift_id', 'academic_year', 'year_level', 'semester', 'section', 'is_active')
                 ->orderBy('code')
                 ->get());
-            
-            
+        });
+    }
+
+    public function getStages(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn () =>
+                \App\Models\AcademicInfo::select('stage')
+                    ->distinct()
+                    ->whereNotNull('stage')
+                    ->orderBy('stage')
+                    ->pluck('stage')
+                    ->map(fn ($v) => ['value' => $v, 'label' => $v])
+                    ->toArray()
+            );
+        });
+    }
+
+    public function getBatchYears(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn () =>
+                \App\Models\AcademicInfo::select('batch_year')
+                    ->distinct()
+                    ->whereNotNull('batch_year')
+                    ->orderByDesc('batch_year')
+                    ->pluck('batch_year')
+                    ->map(fn ($v) => ['value' => (string) $v, 'label' => (string) $v])
+                    ->toArray()
+            );
+        });
+    }
+
+    public function getStudyDays(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn () =>
+                \App\Models\AcademicInfo::select('study_days')
+                    ->distinct()
+                    ->whereNotNull('study_days')
+                    ->orderBy('study_days')
+                    ->pluck('study_days')
+                    ->map(fn ($v) => ['value' => $v, 'label' => $v])
+                    ->toArray()
+            );
         });
     }
 
     public function getStudentTypes(): array
     {
-        return $this->trace(__FUNCTION__, function (): array {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
             return [
-                ['value' => 'PAY', 'label' => 'PAY'],
+                ['value' => 'PAY',     'label' => 'PAY'],
                 ['value' => 'PENDING', 'label' => 'PENDING'],
-                ['value' => 'PASS', 'label' => 'PASS'],
-                ['value' => 'FAIL', 'label' => 'FAIL'],
+                ['value' => 'PASS',    'label' => 'PASS'],
+                ['value' => 'FAIL',    'label' => 'FAIL'],
             ];
-            
-            
+        });
+    }
+
+    public function getTeachers()
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn) {
+            return $this->rememberLookup($fn, [], fn () => Teacher::query()
+                ->select('id', 'first_name', 'last_name')
+                ->orderBy('first_name')
+                ->get()
+                ->map(fn ($t) => [
+                    'id'   => $t->id,
+                    'name' => trim($t->first_name . ' ' . $t->last_name),
+                ]));
         });
     }
 
@@ -170,32 +218,30 @@ class LookupService extends BaseService
         mixed $districtId = null,
         mixed $shiftId = null
     ): array {
-        return $this->trace(__FUNCTION__, function () use ($facultyId, $majorId, $provinceId, $districtId, $shiftId): array {
-            $facultyId = $this->toNullableInt($facultyId);
-            $majorId = $this->toNullableInt($majorId);
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $facultyId, $majorId, $provinceId, $districtId, $shiftId): array {
+            $facultyId  = $this->toNullableInt($facultyId);
+            $majorId    = $this->toNullableInt($majorId);
             $provinceId = $this->toNullableInt($provinceId);
             $districtId = $this->toNullableInt($districtId);
-            $shiftId = $this->toNullableInt($shiftId);
-            
-            return $this->rememberLookup(__FUNCTION__, [
-                'faculty_id' => $facultyId,
-                'major_id' => $majorId,
+            $shiftId    = $this->toNullableInt($shiftId);
+            return $this->rememberLookup($fn, [
+                'faculty_id'  => $facultyId,
+                'major_id'    => $majorId,
                 'province_id' => $provinceId,
                 'district_id' => $districtId,
-                'shift_id' => $shiftId,
+                'shift_id'    => $shiftId,
             ], fn (): array => [
-                'faculties' => $this->getFaculties(),
-                'majors' => $this->getMajorsByFaculty($facultyId),
-                'subjects' => $this->getSubjectsByMajor($majorId),
-                'provinces' => $this->getProvinces(),
-                'districts' => $this->getDistrictsByProvince($provinceId),
-                'communes' => $this->getCommunesByDistrict($districtId),
-                'shifts' => $this->getShifts(),
-                'classes' => $this->getClasses($majorId, $shiftId),
+                'faculties'     => $this->getFaculties(),
+                'majors'        => $this->getMajorsByFaculty($facultyId),
+                'subjects'      => $this->getSubjectsByMajor($majorId),
+                'provinces'     => $this->getProvinces(),
+                'districts'     => $this->getDistrictsByProvince($provinceId),
+                'communes'      => $this->getCommunesByDistrict($districtId),
+                'shifts'        => $this->getShifts(),
+                'classes'       => $this->getClasses($majorId, $shiftId),
                 'student_types' => $this->getStudentTypes(),
             ]);
-            
-            
         });
     }
 

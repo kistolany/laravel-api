@@ -31,12 +31,13 @@ class StudentResource extends JsonResource
             'status'            => $this->status,
 
             // 'whenLoaded' is great because it prevents unnecessary SQL queries
-            'academic_details'  => new AcademicInfoResource($this->whenLoaded('academicInfo')),
+            'academic_details'  => $this->whenLoaded('academicInfo', fn() => new AcademicInfoResource($this->academicInfo)),
             'addresses'         => AddressResource::collection($this->whenLoaded('addresses')),
             'parent_guardian'   => new ParentGuardianResource($this->whenLoaded('parentGuardian')),
             'classes'           => StudentClassResource::collection($this->whenLoaded('classes')),
 
             // Safety check: only format if the timestamp exists
+            'registration_date'  => $this->registration_date,
             'created_at'        => $this->created_at?->format('Y-m-d H:i:s'),
             'updated_at'        => $this->updated_at?->format('Y-m-d H:i:s'),
         ];

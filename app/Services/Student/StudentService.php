@@ -68,8 +68,8 @@ class StudentService extends BaseService
                 });
             });
             
-            // 7. Filter by Status (default: only show enabled students)
-            $query->where('status', 'enable');
+            // 7. Filter by Status (default: only show active students)
+            $query->where('status', 'active');
 
             // 8. Final Sort and Paginate
             return $this->paginateResponse($query->latest(), StudentResource::class);
@@ -79,13 +79,37 @@ class StudentService extends BaseService
     }
 
     /**
+     * Get only PENDING (scholarship) students with pagination.
+     */
+    public function pendingStudents(): PaginatedResult
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): PaginatedResult {
+            $query = Students::with([
+                'academicInfo.major.faculty',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+            ])->where('student_type', 'PENDING')
+              ->where('status', 'active');
+
+            return $this->paginateResponse($query->latest(), StudentResource::class);
+        });
+    }
+
+    /**
      * Get only PAY or PASS students with pagination.
+     * Optional query params:
+     *   major_id, shift_id, faculty_id, stage, batch_year, study_days,
+     *   class_id, search, per_page
      */
     public function payOrPass(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
             $query = Students::with([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
@@ -93,10 +117,54 @@ class StudentService extends BaseService
                 'parentGuardian',
                 'classes',
             ])->whereIn('student_type', ['PAY', 'PASS']);
-            
+
+            // Filter by major
+            $query->when(request('major_id'), function ($q, $majorId) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('major_id', $majorId));
+            });
+
+            // Filter by shift
+            $query->when(request('shift_id'), function ($q, $shiftId) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('shift_id', $shiftId));
+            });
+
+            // Filter by faculty (via major)
+            $query->when(request('faculty_id'), function ($q, $facultyId) {
+                $q->whereHas('academicInfo.major', fn($sub) => $sub->where('faculty_id', $facultyId));
+            });
+
+            // Filter by stage (year level e.g. "Year 1")
+            $query->when(request('stage'), function ($q, $stage) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('stage', $stage));
+            });
+
+            // Filter by batch year
+            $query->when(request('batch_year'), function ($q, $batchYear) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $batchYear));
+            });
+
+            // Filter by study_days (study year / schedule)
+            $query->when(request('study_days'), function ($q, $studyDays) {
+                $q->whereHas('academicInfo', fn($sub) => $sub->where('study_days', $studyDays));
+            });
+
+            // Filter by class: "none" = no class assigned, otherwise filter by class id
+            if (request('class_id') === 'none') {
+                $query->whereDoesntHave('classes');
+            } elseif (request('class_id')) {
+                $query->whereHas('classes', fn($sub) => $sub->where('classes.id', request('class_id')));
+            }
+
+            // Search by name or barcode
+            $query->when(request('search'), function ($q, $search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->where('full_name_en', 'like', "%{$search}%")
+                        ->orWhere('full_name_kh', 'like', "%{$search}%")
+                        ->orWhere('id', 'like', "%{$search}%");
+                });
+            });
+
             return $this->paginateResponse($query->latest(), StudentResource::class);
-            
-            
         });
     }
 

@@ -9,6 +9,7 @@ use App\DTOs\PaginatedResult;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Major\MajorResource;
+use App\Models\Faculty;
 use App\Models\Major;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
@@ -46,7 +47,7 @@ class MajorService extends BaseService
             $this->facultyService->findById($facultyId);
             
             return Major::where('faculty_id', $facultyId)
-                ->orderBy('name_eg')
+                ->orderBy('name')
                 ->get();
             
             
@@ -74,16 +75,19 @@ class MajorService extends BaseService
     public function create(array $data): Major
     {
         return $this->trace(__FUNCTION__, function () use ($data): Major {
-            // validate existing faculty_id
+            // Resolve faculty name → faculty_id if frontend sends name string
+            if (empty($data['faculty_id']) && !empty($data['faculty'])) {
+                $faculty = Faculty::where('name', $data['faculty'])->first();
+                if (!$faculty) {
+                    throw new ApiException(ResponseStatus::NOT_FOUND, "Faculty '{$data['faculty']}' not found.");
+                }
+                $data['faculty_id'] = $faculty->id;
+            }
+
             $this->facultyService->findById($data['faculty_id']);
-            
-            // call method and validate exist name 
             $validatedData = $this->validateExisting($data);
             $validatedData['faculty_id'] = $data['faculty_id'];
-            //create and return
             return Major::create($validatedData);
-            
-            
         });
     }
 
@@ -91,20 +95,24 @@ class MajorService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($id, $data): Major {
             $major = $this->findById($id);
-            
-            // If the request doesn't send a new faculty_id, use the existing one for validation
+
+            // Resolve faculty name → faculty_id
+            if (empty($data['faculty_id']) && !empty($data['faculty'])) {
+                $faculty = Faculty::where('name', $data['faculty'])->first();
+                if ($faculty) {
+                    $data['faculty_id'] = $faculty->id;
+                }
+            }
+
             if (!isset($data['faculty_id'])) {
                 $data['faculty_id'] = $major->faculty_id;
             } else {
                 $this->facultyService->findById($data['faculty_id']);
             }
-            
+
             $validatedData = $this->validateExisting($data, $major->id);
-            
             $major->update($validatedData);
             return $major;
-            
-            
         });
     }
 
@@ -127,37 +135,25 @@ class MajorService extends BaseService
         $facultyId = $data['faculty_id'] ?? null;
 
         $validator = \Illuminate\Support\Facades\Validator::make($data, [
-            'name_kh' => [
-                'nullable',
-                'string',
-                Rule::unique('majors', 'name_kh')
-                    ->where('faculty_id', $facultyId)
-                    ->ignore($ignoreId),
-            ],
-            'name_eg' => [
+            'name' => [
                 'required',
                 'string',
-                Rule::unique('majors', 'name_eg')
+                Rule::unique('majors', 'name')
                     ->where('faculty_id', $facultyId)
                     ->ignore($ignoreId),
             ],
         ]);
 
         if ($validator->fails()) {
-            $errors = $validator->errors()->toArray();
-            $message = $validator->errors()->first('name_eg')
-                ?: $validator->errors()->first('name_kh')
-                ?: 'Validation failed for major data.';
+            $message = $validator->errors()->first('name') ?: 'Validation failed for major data.';
 
             Log::warning('Major validation failed.', [
                 'faculty_id' => $facultyId,
-                'ignore_id' => $ignoreId,
-                'name_eg' => $data['name_eg'] ?? null,
-                'name_kh' => $data['name_kh'] ?? null,
-                'errors' => $errors,
+                'ignore_id'  => $ignoreId,
+                'name'       => $data['name'] ?? null,
+                'errors'     => $validator->errors()->toArray(),
             ]);
 
-            // call api exception for throw
             throw new ApiException(
                 ResponseStatus::EXISTING_DATA,
                 $message,

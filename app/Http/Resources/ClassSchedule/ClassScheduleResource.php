@@ -18,7 +18,7 @@ class ClassScheduleResource extends JsonResource
             'teacher_id'    => $this->teacher_id,
             'teacher_name'  => $this->teacher ? trim($this->teacher->first_name . ' ' . $this->teacher->last_name) : null,
             'shift_id'      => $this->shift_id,
-            'shift'         => $this->shift?->name_en,
+            'shift'         => $this->shift?->name,
             'day_of_week'   => $this->day_of_week,
             'academic_year' => $this->academic_year,
             'year_level'    => $this->year_level,

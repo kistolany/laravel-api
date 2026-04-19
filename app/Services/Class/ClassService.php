@@ -18,8 +18,8 @@ class ClassService extends BaseService
     public function index(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = Classes::query()->latest();
-            
+            $query = Classes::query()->withCount('classStudents')->latest();
+
             return $this->paginateResponse($query, ClassResource::class);
             
             
@@ -31,8 +31,9 @@ class ClassService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($id, $withStudents): Classes {
             $query = Classes::query();
             
+            $query->with(['major', 'shift']);
             if ($withStudents) {
-                $query->with('students');
+                $query->with(['students.academicInfo.major']);
             }
             
             $class = $query->find($id);
@@ -59,6 +60,26 @@ class ClassService extends BaseService
             return Classes::create($validatedData);
             
             
+        });
+    }
+
+    public function delete(int $id): void
+    {
+        $this->trace(__FUNCTION__, function () use ($id): void {
+            $class = $this->findById($id);
+            $class->students()->detach();
+            $class->schedules()->delete();
+            $class->attendanceSessions()->delete();
+            $class->delete();
+        });
+    }
+
+    public function removeStudent(int $classId, mixed $studentId): void
+    {
+        $this->trace(__FUNCTION__, function () use ($classId, $studentId): void {
+            $class = $this->findById($classId);
+            $resolvedId = $this->resolveStudentId($studentId);
+            $class->students()->detach($resolvedId);
         });
     }
 

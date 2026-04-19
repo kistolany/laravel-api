@@ -10,8 +10,8 @@ class SubjectRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name_kh' => 'sometimes|string',
-            'name_eg' => 'sometimes|string',
+            'name'         => 'sometimes|required|string',
+            'subject_Code' => 'sometimes|nullable|string|max:50',
         ];
     }
 

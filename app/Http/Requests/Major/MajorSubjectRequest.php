@@ -14,16 +14,18 @@ class MajorSubjectRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'major_id'     => 'required|exists:majors,id',
-            'year_level'   => 'required|integer|between:1,5',
+            // Accept either major_id (int) or major (name string from frontend)
+            'major_id'     => 'sometimes|integer|exists:majors,id',
+            'major'        => 'sometimes|string',
+            'faculty'      => 'sometimes|string',
+
+            // Frontend sends 'year', API internally uses 'year_level'
+            'year_level'   => 'sometimes|integer|between:1,5',
+            'year'         => 'sometimes|integer|between:1,5',
             'semester'     => 'required|integer|in:1,2',
 
-            // Pass even if subject_id is missing from JSON
             'subject_id'   => 'nullable|integer|exists:subjects,id',
-
-            // If ID is missing, we need the name to create a new one
-            'name_eg'      => 'required_without:subject_id|string|max:255',
-            'name_kh'      => 'nullable|string|max:255',
+            'name'         => 'sometimes|string|max:255',
             'subject_Code' => 'nullable|string|max:50',
         ];
     }

@@ -30,6 +30,12 @@ class MajorSubjectController extends Controller
         return $this->success(MajorSubjectResource::collection($data));
     }
 
+    public function show($id)
+    {
+        $data = $this->service->findById($id);
+        return $this->success(new MajorSubjectResource($data));
+    }
+
     /**
      * Create a new assignment (Assign subject to Major/Year/Sem)
      */

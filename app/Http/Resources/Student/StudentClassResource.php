@@ -13,7 +13,7 @@ class StudentClassResource extends JsonResource
 
         return [
             'class_id' => $this->id,
-            'code' => $this->code,
+            'code' => $this->code ?? $this->name,
             'academic_year' => $this->academic_year,
             'year_level' => $this->year_level,
             'semester' => $this->semester,

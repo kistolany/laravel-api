@@ -10,9 +10,11 @@ class MajorRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'faculty_id'=>'sometimes|integer',
-            'name_kh' => 'sometimes|nullable|string',
-            'name_eg' => 'sometimes|string',
+            'faculty_id' => 'sometimes|integer',
+            'faculty'    => 'sometimes|string',  // faculty name (sent by frontend)
+            'name'       => 'sometimes|required|string',
+            'year'       => 'sometimes|integer',
+            'shift'      => 'sometimes|string',
         ];
     }
 

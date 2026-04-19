@@ -7,8 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Shift extends Model
 {
      protected $fillable = [
-        'name_kh',
-        'name_en',
+        'name',
         'time_range',
     ];
 }

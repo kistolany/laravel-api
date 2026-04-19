@@ -42,9 +42,13 @@ Route::prefix('v1')->group(function () {
         Route::get('shifts', [LookupController::class, 'shifts']);
         Route::get('classes', [LookupController::class, 'classes']);
         Route::get('student-types', [LookupController::class, 'studentTypes']);
+        Route::get('stages', [LookupController::class, 'stages']);
+        Route::get('batch-years', [LookupController::class, 'batchYears']);
+        Route::get('study-days', [LookupController::class, 'studyDays']);
         Route::get('provinces', [LookupController::class, 'provinces']);
         Route::get('districts', [LookupController::class, 'districts']);
         Route::get('communes', [LookupController::class, 'communes']);
+        Route::get('teachers', [LookupController::class, 'teachers']);
     });
 
     // Authentication & JWT
@@ -94,13 +98,11 @@ Route::prefix('v1')->group(function () {
 
         // Student routes
         Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
-        Route::apiResource('students', StudentController::class)->middleware([
-            'index' => 'permission:student.view',
-            'show' => 'permission:student.view',
-            'store' => 'permission:student.create',
-            'update' => 'permission:student.update',
-            'destroy' => 'permission:student.delete',
-        ]);
+        Route::get('students/pending', [StudentController::class, 'pendingStudents'])->middleware('permission:student.view');
+        Route::apiResource('students', StudentController::class)->only(['index', 'show'])->middleware('permission:student.view');
+        Route::apiResource('students', StudentController::class)->only(['store'])->middleware('permission:student.create');
+        Route::apiResource('students', StudentController::class)->only(['update'])->middleware('permission:student.update');
+        Route::apiResource('students', StudentController::class)->only(['destroy'])->middleware('permission:student.delete');
         Route::patch('students/{id}/disable', [StudentController::class, 'setDisable'])->middleware('permission:student.disable');
         Route::patch('students/{id}/status', [StudentController::class, 'updateStatus'])->middleware('permission:student.status.update');
         Route::patch('students/{id}/student-type', [StudentController::class, 'updateStudentType'])->middleware('permission:student.update');
@@ -115,9 +117,11 @@ Route::prefix('v1')->group(function () {
         Route::post('classes', [ClassController::class, 'store'])->middleware('permission:class.create');
         Route::get('classes', [ClassController::class, 'index'])->middleware('permission:class.view');
         Route::get('classes/{id}', [ClassController::class, 'show'])->middleware('permission:class.view');
+        Route::delete('classes/{id}', [ClassController::class, 'destroy'])->middleware('permission:class.delete');
         Route::get('classes/{id}/students', [ClassController::class, 'students'])->middleware('permission:class.students.view');
         Route::get('classes/{id}/subjects', [ClassController::class, 'subjects'])->middleware('permission:class.subjects.view');
         Route::post('classes/{id}/students', [ClassController::class, 'addStudent'])->middleware('permission:class.students.add');
+        Route::delete('classes/{id}/students/{studentId}', [ClassController::class, 'removeStudent'])->middleware('permission:class.students.add');
         Route::post('classes/{id}/students/by-major', [ClassController::class, 'addStudentsByMajor'])->middleware('permission:class.students.add_by_major');
         Route::post('classes/{id}/subjects', [ClassController::class, 'assignSubject'])->middleware('permission:class.subjects.assign');
 
@@ -138,108 +142,75 @@ Route::prefix('v1')->group(function () {
 
         // Major routes
         Route::get('majors', [MajorController::class, 'index'])->middleware('permission:major.view');
-        Route::apiResource('majors', MajorController::class)->except(['index'])->middleware([
-            'show' => 'permission:major.view',
-            'store' => 'permission:major.create',
-            'update' => 'permission:major.update',
-            'destroy' => 'permission:major.delete',
-        ]);
+        Route::apiResource('majors', MajorController::class)->only(['show'])->middleware('permission:major.view');
+        Route::apiResource('majors', MajorController::class)->only(['store'])->middleware('permission:major.create');
+        Route::apiResource('majors', MajorController::class)->only(['update'])->middleware('permission:major.update');
+        Route::apiResource('majors', MajorController::class)->only(['destroy'])->middleware('permission:major.delete');
         Route::get('majors/faculty/{facultyId}', [MajorController::class, 'getByFaculty'])->middleware('permission:major.by_faculty.view');
 
         // Faculty routes
-        Route::apiResource('faculties', FacultyController::class)->middleware([
-            'index' => 'permission:faculty.view',
-            'show' => 'permission:faculty.view',
-            'store' => 'permission:faculty.create',
-            'update' => 'permission:faculty.update',
-            'destroy' => 'permission:faculty.delete',
-        ]);
+        Route::get('faculties/tree', [FacultyController::class, 'tree'])->middleware('permission:faculty.view');
+        Route::apiResource('faculties', FacultyController::class)->only(['index', 'show'])->middleware('permission:faculty.view');
+        Route::apiResource('faculties', FacultyController::class)->only(['store'])->middleware('permission:faculty.create');
+        Route::apiResource('faculties', FacultyController::class)->only(['update'])->middleware('permission:faculty.update');
+        Route::apiResource('faculties', FacultyController::class)->only(['destroy'])->middleware('permission:faculty.delete');
 
         // Subject routes
-        Route::apiResource('subjects', SubjectController::class)->middleware([
-            'index' => 'permission:subject.view',
-            'show' => 'permission:subject.view',
-            'store' => 'permission:subject.create',
-            'update' => 'permission:subject.update',
-            'destroy' => 'permission:subject.delete',
-        ]);
+        Route::apiResource('subjects', SubjectController::class)->only(['index', 'show'])->middleware('permission:subject.view');
+        Route::apiResource('subjects', SubjectController::class)->only(['store'])->middleware('permission:subject.create');
+        Route::apiResource('subjects', SubjectController::class)->only(['update'])->middleware('permission:subject.update');
+        Route::apiResource('subjects', SubjectController::class)->only(['destroy'])->middleware('permission:subject.delete');
 
         // Major Subject routes
-        Route::apiResource('major-subjects', MajorSubjectController::class)->middleware([
-            'index' => 'permission:major_subject.view',
-            'show' => 'permission:major_subject.view',
-            'store' => 'permission:major_subject.create',
-            'update' => 'permission:major_subject.update',
-            'destroy' => 'permission:major_subject.delete',
-        ]);
+        Route::apiResource('major-subjects', MajorSubjectController::class)->only(['index', 'show'])->middleware('permission:major_subject.view');
+        Route::apiResource('major-subjects', MajorSubjectController::class)->only(['store'])->middleware('permission:major_subject.create');
+        Route::apiResource('major-subjects', MajorSubjectController::class)->only(['update'])->middleware('permission:major_subject.update');
+        Route::apiResource('major-subjects', MajorSubjectController::class)->only(['destroy'])->middleware('permission:major_subject.delete');
         Route::get('major-subjects/major/{majorId}', [MajorSubjectController::class, 'getByMajor'])->middleware('permission:major_subject.by_major.view');
 
         // Academic Info routes
-        Route::apiResource('academic_info', AcademicInfoController::class)->middleware([
-            'index' => 'permission:academic_info.view',
-            'show' => 'permission:academic_info.view',
-            'store' => 'permission:academic_info.create',
-            'update' => 'permission:academic_info.update',
-            'destroy' => 'permission:academic_info.delete',
-        ]);
+        Route::apiResource('academic_info', AcademicInfoController::class)->only(['index', 'show'])->middleware('permission:academic_info.view');
+        Route::apiResource('academic_info', AcademicInfoController::class)->only(['store'])->middleware('permission:academic_info.create');
+        Route::apiResource('academic_info', AcademicInfoController::class)->only(['update'])->middleware('permission:academic_info.update');
+        Route::apiResource('academic_info', AcademicInfoController::class)->only(['destroy'])->middleware('permission:academic_info.delete');
         Route::get('academic_info/major/{majorId}', [AcademicInfoController::class, 'getByMajorId'])->middleware('permission:academic_info.by_major.view');
         Route::get('academic_info/shift/{shiftId}', [AcademicInfoController::class, 'getByShiftId'])->middleware('permission:academic_info.by_shift.view');
 
         // Shift routes
-        Route::apiResource('shifts', ShiftController::class)->middleware([
-            'index' => 'permission:shift.view',
-            'show' => 'permission:shift.view',
-            'store' => 'permission:shift.create',
-            'update' => 'permission:shift.update',
-            'destroy' => 'permission:shift.delete',
-        ]);
+        Route::apiResource('shifts', ShiftController::class)->only(['index', 'show'])->middleware('permission:shift.view');
+        Route::apiResource('shifts', ShiftController::class)->only(['store'])->middleware('permission:shift.create');
+        Route::apiResource('shifts', ShiftController::class)->only(['update'])->middleware('permission:shift.update');
+        Route::apiResource('shifts', ShiftController::class)->only(['destroy'])->middleware('permission:shift.delete');
 
         // Scholarship routes
-        Route::apiResource('scholarships', ScholarshipController::class)->middleware([
-            'index' => 'permission:scholarship.view',
-            'show' => 'permission:scholarship.view',
-            'store' => 'permission:scholarship.create',
-            'update' => 'permission:scholarship.update',
-            'destroy' => 'permission:scholarship.delete',
-        ]);
+        Route::apiResource('scholarships', ScholarshipController::class)->only(['index', 'show'])->middleware('permission:scholarship.view');
+        Route::apiResource('scholarships', ScholarshipController::class)->only(['store'])->middleware('permission:scholarship.create');
+        Route::apiResource('scholarships', ScholarshipController::class)->only(['update'])->middleware('permission:scholarship.update');
+        Route::apiResource('scholarships', ScholarshipController::class)->only(['destroy'])->middleware('permission:scholarship.delete');
 
         // Student Registration routes
-        Route::apiResource('student-registrations', StudentRegistrationController::class)->middleware([
-            'index' => 'permission:student_registration.view',
-            'show' => 'permission:student_registration.view',
-            'store' => 'permission:student_registration.create',
-            'update' => 'permission:student_registration.update',
-            'destroy' => 'permission:student_registration.delete',
-        ]);
+        Route::apiResource('student-registrations', StudentRegistrationController::class)->only(['index', 'show'])->middleware('permission:student_registration.view');
+        Route::apiResource('student-registrations', StudentRegistrationController::class)->only(['store'])->middleware('permission:student_registration.create');
+        Route::apiResource('student-registrations', StudentRegistrationController::class)->only(['update'])->middleware('permission:student_registration.update');
+        Route::apiResource('student-registrations', StudentRegistrationController::class)->only(['destroy'])->middleware('permission:student_registration.delete');
 
         // Province routes
-        Route::apiResource('provinces', ProvinceController::class)->only(['index', 'show'])->middleware([
-            'index' => 'permission:province.view',
-            'show' => 'permission:province.view',
-        ]);
-        Route::apiResource('provinces', ProvinceController::class)->except(['index', 'show'])->middleware([
-            'store' => 'permission:province.create',
-            'update' => 'permission:province.update',
-            'destroy' => 'permission:province.delete',
-        ]);
+        Route::apiResource('provinces', ProvinceController::class)->only(['index', 'show'])->middleware('permission:province.view');
+        Route::apiResource('provinces', ProvinceController::class)->only(['store'])->middleware('permission:province.create');
+        Route::apiResource('provinces', ProvinceController::class)->only(['update'])->middleware('permission:province.update');
+        Route::apiResource('provinces', ProvinceController::class)->only(['destroy'])->middleware('permission:province.delete');
 
         // District routes
-        Route::apiResource('districts', DistrictController::class)->middleware([
-            'index' => 'permission:district.view',
-            'show' => 'permission:district.view',
-            'store' => 'permission:district.create',
-            'update' => 'permission:district.update',
-            'destroy' => 'permission:district.delete',
-        ]);
+        Route::apiResource('districts', DistrictController::class)->only(['index', 'show'])->middleware('permission:district.view');
+        Route::apiResource('districts', DistrictController::class)->only(['store'])->middleware('permission:district.create');
+        Route::apiResource('districts', DistrictController::class)->only(['update'])->middleware('permission:district.update');
+        Route::apiResource('districts', DistrictController::class)->only(['destroy'])->middleware('permission:district.delete');
 
         // Commune routes
-        Route::apiResource('communes', CommuneController::class)->middleware([
-            'index' => 'permission:commune.view',
-            'show' => 'permission:commune.view',
-            'store' => 'permission:commune.create',
-            'update' => 'permission:commune.update',
-            'destroy' => 'permission:commune.delete',
-        ]);
+        Route::apiResource('communes', CommuneController::class)->only(['index', 'show'])->middleware('permission:commune.view');
+        Route::apiResource('communes', CommuneController::class)->only(['store'])->middleware('permission:commune.create');
+        Route::apiResource('communes', CommuneController::class)->only(['update'])->middleware('permission:commune.update');
+        Route::apiResource('communes', CommuneController::class)->only(['destroy'])->middleware('permission:commune.delete');
     });
 
     // Route::middleware('auth.teacher')->prefix('teacher')->group(function () {

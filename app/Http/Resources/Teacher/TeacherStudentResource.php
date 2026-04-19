@@ -26,8 +26,7 @@ class TeacherStudentResource extends JsonResource
             ] : null,
             'shift' => $this->academicInfo?->shift ? [
                 'id' => $this->academicInfo->shift->id,
-                'name_en' => $this->academicInfo->shift->name_en,
-                'name_kh' => $this->academicInfo->shift->name_kh,
+                'name' => $this->academicInfo->shift->name,
             ] : null,
             'batch_year' => $this->academicInfo?->batch_year,
             'stage' => $this->academicInfo?->stage,

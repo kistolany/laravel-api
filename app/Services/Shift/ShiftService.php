@@ -80,15 +80,10 @@ class ShiftService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = \Illuminate\Support\Facades\Validator::make($data, [
-            'name_kh' => [
+            'name' => [
                 'required',
                 'string',
-                Rule::unique('shifts', 'name_kh')->ignore($ignoreId),
-            ],
-            'name_en' => [
-                'required',
-                'string',
-                Rule::unique('shifts', 'name_en')->ignore($ignoreId),
+                Rule::unique('shifts', 'name')->ignore($ignoreId),
             ],
             'time_range' => [
                 'required',
@@ -98,15 +93,13 @@ class ShiftService extends BaseService
 
         if ($validator->fails()) {
             $errors = $validator->errors()->toArray();
-            $message = $validator->errors()->first('name_en')
-                ?: $validator->errors()->first('name_kh')
+            $message = $validator->errors()->first('name')
                 ?: $validator->errors()->first('time_range')
                 ?: 'Validation failed for shift data.';
 
             Log::warning('Shift validation failed.', [
                 'ignore_id' => $ignoreId,
-                'name_en' => $data['name_en'] ?? null,
-                'name_kh' => $data['name_kh'] ?? null,
+                'name' => $data['name'] ?? null,
                 'time_range' => $data['time_range'] ?? null,
                 'errors' => $errors,
             ]);

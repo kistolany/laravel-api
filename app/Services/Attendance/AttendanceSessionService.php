@@ -228,7 +228,7 @@ class AttendanceSessionService
                     ],
                     'shift' => [
                         'id' => $shift?->id,
-                        'name_en' => $shift?->name_en,
+                        'name' => $shift?->name,
                         'time_range' => $shift?->time_range,
                     ],
                     'students' => $students,

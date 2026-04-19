@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Major\MajorSubjectResource;
 use App\Models\Classes;
+use App\Models\Major;
 use App\Models\MajorSubject;
 use App\Models\Subject;
 use Illuminate\Support\Facades\DB;
@@ -86,28 +87,33 @@ class Major_subject_service extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($data): MajorSubject {
             return DB::transaction(function () use ($data) {
-            
-                // 1. If subject_id isn't sent, find or create by English Name
-                if (empty($data['subject_id'])) {
+
+                // Resolve major name → major_id (frontend sends major name string)
+                if (empty($data['major_id']) && !empty($data['major'])) {
+                    $major = Major::where('name', $data['major'])->first();
+                    if (!$major) {
+                        throw new ApiException(ResponseStatus::NOT_FOUND, "Major '{$data['major']}' not found.");
+                    }
+                    $data['major_id'] = $major->id;
+                }
+
+                // Map frontend 'year' → 'year_level'
+                if (empty($data['year_level']) && !empty($data['year'])) {
+                    $data['year_level'] = $data['year'];
+                }
+
+                // Find or create subject by name
+                if (empty($data['subject_id']) && !empty($data['name'])) {
                     $subject = Subject::firstOrCreate(
-                        ['name_eg' => $data['name_eg']], // Search criteria
-                        [
-                            'subject_Code' => $data['subject_Code'] ?? null, // Optional
-                            'name_kh'      => $data['name_kh'] ?? null,      // Optional
-                        ]
+                        ['name' => $data['name']],
+                        ['subject_Code' => $data['subject_Code'] ?? null]
                     );
-            
                     $data['subject_id'] = $subject->id;
                 }
-            
-                // 2. Validate the assignment link
+
                 $validatedData = $this->validateAssignment($data);
-            
-                // 3. Create the record in major_subjects
                 return MajorSubject::create($validatedData);
             });
-            
-            
         });
     }
 
@@ -129,10 +135,41 @@ class Major_subject_service extends BaseService
     public function update(int $id, array $data): MajorSubject
     {
         return $this->trace(__FUNCTION__, function () use ($id, $data): MajorSubject {
-            // 1. Find it
             $assignment = $this->findById($id);
-            
-            // 2. Validate (Ignoring the current ID to avoid "duplicate" errors with itself)
+
+            // Resolve major name → major_id
+            if (empty($data['major_id']) && !empty($data['major'])) {
+                $major = Major::where('name', $data['major'])->first();
+                if ($major) $data['major_id'] = $major->id;
+            }
+            if (empty($data['major_id'])) {
+                $data['major_id'] = $assignment->major_id;
+            }
+
+            // Map 'year' → 'year_level'
+            if (empty($data['year_level']) && !empty($data['year'])) {
+                $data['year_level'] = $data['year'];
+            }
+            if (empty($data['year_level'])) {
+                $data['year_level'] = $assignment->year_level;
+            }
+
+            if (empty($data['semester'])) {
+                $data['semester'] = $assignment->semester;
+            }
+
+            // Resolve subject by name
+            if (empty($data['subject_id']) && !empty($data['name'])) {
+                $subject = Subject::firstOrCreate(
+                    ['name' => $data['name']],
+                    ['subject_Code' => $data['subject_Code'] ?? null]
+                );
+                $data['subject_id'] = $subject->id;
+            }
+            if (empty($data['subject_id'])) {
+                $data['subject_id'] = $assignment->subject_id;
+            }
+
             $validatedData = $this->validateAssignment($data, $assignment->id);
             
             // 3. Update and return
@@ -171,11 +208,8 @@ class Major_subject_service extends BaseService
             'semester'   => 'required|integer|in:1,2',
 
             // CHANGE THIS: Change 'required' to 'nullable'
-            'subject_id' => 'nullable|exists:subjects,id',
-
-            'name_eg'      => 'required_without:subject_id|string',
+            'subject_id'   => 'nullable|exists:subjects,id',
             'subject_Code' => 'nullable|string',
-            'name_kh'      => 'nullable|string',
         ];
 
         $validator = Validator::make($data, $rules);
@@ -209,11 +243,11 @@ class Major_subject_service extends BaseService
             Log::warning('Major-subject assignment validation failed.', [
                 'ignore_id' => $ignoreId,
                 'data' => [
-                    'major_id' => $data['major_id'] ?? null,
+                    'major_id'   => $data['major_id'] ?? null,
                     'subject_id' => $data['subject_id'] ?? null,
                     'year_level' => $data['year_level'] ?? null,
-                    'semester' => $data['semester'] ?? null,
-                    'name_eg' => $data['name_eg'] ?? null,
+                    'semester'   => $data['semester'] ?? null,
+                    'name'       => $data['name'] ?? null,
                 ],
                 'errors' => $errors,
             ]);

@@ -19,7 +19,12 @@ class AcademicInfoResource extends JsonResource
         return [
             'id' => $this->id,
             'student_id' => $this->student_id,
-            'major' => new MajorResource($this->whenLoaded('major')),
+            'major' => ($this->resource && $this->resource->relationLoaded('major') && $this->resource->major) ? [
+                'id'           => $this->resource->major->id,
+                'faculty_id'   => $this->resource->major->faculty_id,
+                'faculty_name' => $this->resource->major->faculty?->name ?? null,
+                'name'         => $this->resource->major->name,
+            ] : null,
             'shift' => new ShiftResource($this->whenLoaded('shift')),
             'batch_year' => $this->batch_year,
             'stage' => $this->stage,

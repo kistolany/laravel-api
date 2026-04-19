@@ -38,6 +38,14 @@ class StudentController extends Controller
     }
 
     /**
+     * Display only students with student_type PENDING (scholarship waiting for exam result).
+     */
+    public function pendingStudents()
+    {
+        return $this->success($this->service->pendingStudents());
+    }
+
+    /**
      * Store a newly created student (and their academic info).
      */
     public function store(StudentRequest $request) 

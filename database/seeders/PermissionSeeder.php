@@ -28,6 +28,7 @@ class PermissionSeeder extends Seeder
 
             'class.view',
             'class.create',
+            'class.delete',
             'class.students.view',
             'class.students.add',
             'class.students.add_by_major',

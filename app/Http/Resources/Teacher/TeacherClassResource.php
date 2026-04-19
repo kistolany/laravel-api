@@ -26,8 +26,7 @@ class TeacherClassResource extends JsonResource
             ] : null,
             'shift' => $this->shift ? [
                 'id' => $this->shift->id,
-                'name_en' => $this->shift->name_en,
-                'name_kh' => $this->shift->name_kh,
+                'name' => $this->shift->name,
                 'time_range' => $this->shift->time_range,
             ] : null,
         ];

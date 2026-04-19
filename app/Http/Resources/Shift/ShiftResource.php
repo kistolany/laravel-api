@@ -16,8 +16,7 @@ class ShiftResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'name_kh' => $this->name_kh,
-            'name_en' => $this->name_en,
+            'name' => $this->name,
             'time_range' => $this->time_range,
         ];
     }

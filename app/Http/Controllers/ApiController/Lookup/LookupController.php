@@ -100,6 +100,26 @@ class LookupController extends Controller
         return $this->success($this->service->getStudentTypes());
     }
 
+    public function stages()
+    {
+        return $this->success($this->service->getStages());
+    }
+
+    public function batchYears()
+    {
+        return $this->success($this->service->getBatchYears());
+    }
+
+    public function studyDays()
+    {
+        return $this->success($this->service->getStudyDays());
+    }
+
+    public function teachers()
+    {
+        return $this->success($this->service->getTeachers());
+    }
+
     /**
      * Get full lookup payload for forms.
      */
