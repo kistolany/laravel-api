@@ -110,6 +110,11 @@ class LookupController extends Controller
         return $this->success($this->service->getBatchYears());
     }
 
+    public function academicYears()
+    {
+        return $this->success($this->service->getAcademicYears());
+    }
+
     public function studyDays()
     {
         return $this->success($this->service->getStudyDays());

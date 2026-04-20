@@ -12,6 +12,7 @@ use App\Models\Major;
 use App\Models\MajorSubject;
 use App\Models\Province;
 use App\Models\Shift;
+use App\Models\StudentScore;
 use App\Models\Subject;
 use App\Models\Teacher;
 use Illuminate\Support\Facades\Cache;
@@ -165,6 +166,24 @@ class LookupService extends BaseService
         });
     }
 
+    public function getAcademicYears(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn () =>
+                collect()
+                    ->merge(Classes::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'))
+                    ->merge(StudentScore::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'))
+                    ->filter()
+                    ->unique()
+                    ->sortDesc()
+                    ->values()
+                    ->map(fn ($value) => ['value' => (string) $value, 'label' => (string) $value])
+                    ->toArray()
+            );
+        });
+    }
+
     public function getStudyDays(): array
     {
         $fn = __FUNCTION__;
@@ -237,6 +256,7 @@ class LookupService extends BaseService
                 'districts'     => $this->getDistrictsByProvince($provinceId),
                 'communes'      => $this->getCommunesByDistrict($districtId),
                 'shifts'        => $this->getShifts(),
+                'academic_years' => $this->getAcademicYears(),
                 'classes'       => $this->getClasses($majorId, $shiftId),
                 'student_types' => $this->getStudentTypes(),
             ]);

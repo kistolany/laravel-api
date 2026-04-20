@@ -16,6 +16,12 @@ class AttendanceSessionController extends Controller
         protected AttendanceSessionService $service
     ) {}
 
+    public function index(): JsonResponse
+    {
+        $response = $this->service->buildListResponse();
+        return response()->json($response['payload'], $response['status']);
+    }
+
     public function show(int $id): JsonResponse
     {
         $response = $this->service->buildDetailResponse($id);

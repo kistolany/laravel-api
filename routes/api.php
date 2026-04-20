@@ -25,6 +25,7 @@ use App\Http\Controllers\ApiController\Subject\SubjectController;
 use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
+use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -46,6 +47,7 @@ Route::prefix('v1')->group(function () {
         Route::get('student-types', [LookupController::class, 'studentTypes']);
         Route::get('stages', [LookupController::class, 'stages']);
         Route::get('batch-years', [LookupController::class, 'batchYears']);
+        Route::get('academic-years', [LookupController::class, 'academicYears']);
         Route::get('study-days', [LookupController::class, 'studyDays']);
         Route::get('provinces', [LookupController::class, 'provinces']);
         Route::get('districts', [LookupController::class, 'districts']);
@@ -94,6 +96,12 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth.jwt')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+
+        // Teacher Attendance routes
+        Route::get('teacher-attendances',         [TeacherAttendanceController::class, 'index']);
+        Route::post('teacher-attendances/bulk',   [TeacherAttendanceController::class, 'bulk']);
+        Route::get('teacher-attendances/history', [TeacherAttendanceController::class, 'history']);
+        Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report']);
 
         // Role & Permission management (Admin only)
         Route::middleware('role:Admin')->group(function () {
@@ -144,6 +152,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('class-schedules/{id}', [ClassScheduleController::class, 'destroy'])->middleware('permission:class_schedule.delete');
 
         // Attendance routes
+        Route::get('attendance-sessions', [AttendanceSessionController::class, 'index'])->middleware('permission:attendance.view');
         Route::get('attendance-sessions/major/{majorId}', [AttendanceSessionController::class, 'byMajor'])->middleware('permission:attendance.view');
         Route::get('attendance-sessions/major/{majorId}/subject/{subjectId}/report', [AttendanceSessionController::class, 'reportByMajorAndSubject'])->middleware('permission:attendance.report.by_major_subject');
         Route::get('attendance-sessions/{id}', [AttendanceSessionController::class, 'show'])->middleware('permission:attendance.view');
@@ -151,6 +160,7 @@ Route::prefix('v1')->group(function () {
         Route::post('attendance-sessions/{id}/records', [AttendanceSessionController::class, 'record'])->middleware('permission:attendance.record');
 
         // Student score routes
+        Route::get('student-scores/final-results', [StudentScoreController::class, 'finalResults'])->middleware('permission:student.view');
         Route::get('student-scores', [StudentScoreController::class, 'index'])->middleware('permission:student.view');
         Route::post('student-scores/bulk', [StudentScoreController::class, 'bulkUpsert'])->middleware('permission:student.update');
 
