@@ -9,6 +9,8 @@ use App\Exceptions\ApiException;
 use App\Mail\TeacherOtpMail;
 use App\Models\Teacher;
 use App\Models\TeacherRefreshToken;
+use App\Models\User;
+use App\Models\Role;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\UploadedFile;
@@ -32,24 +34,61 @@ class TeacherAuthService
         return $this->trace(__FUNCTION__, function () use ($data): Teacher {
             $imagePath = $this->storeImage($data['image'] ?? null);
             
+            // Create Teacher record
             $teacher = Teacher::create([
-                'first_name' => $data['first_name'],
-                'last_name' => $data['last_name'],
-                'gender' => $data['gender'],
-                'major_id' => (int) $data['major_id'],
-                'subject_id' => (int) $data['subject_id'],
-                'email' => strtolower($data['email']),
-                'username' => $data['username'],
-                'password' => Hash::make($data['password']),
-                'phone_number' => $data['phone_number'] ?? null,
-                'telegram' => $data['telegram'] ?? null,
-                'image' => $imagePath,
-                'address' => $data['address'],
-                'role' => 'Teacher',
-                'otp_code' => null,
-                'otp_expires_at' => null,
-                'is_verified' => true,
-                'verified_at' => now(),
+                // core
+                'teacher_id'      => $data['teacher_id']      ?? null,
+                'first_name'      => $data['first_name'],
+                'last_name'       => $data['last_name'],
+                'gender'          => $data['gender'],
+                'major_id'        => (int) $data['major_id'],
+                'subject_id'      => (int) $data['subject_id'],
+                'email'           => strtolower($data['email']),
+                'username'        => $data['username'],
+                'password'        => Hash::make($data['password']),
+                'address'         => $data['address'],
+                // personal
+                'dob'             => $data['dob']             ?? null,
+                'nationality'     => $data['nationality']     ?? null,
+                'religion'        => $data['religion']        ?? null,
+                'marital_status'  => $data['marital_status']  ?? null,
+                'national_id'     => $data['national_id']     ?? null,
+                'phone_number'    => $data['phone_number']    ?? null,
+                'telegram'        => $data['telegram']        ?? null,
+                'image'           => $imagePath,
+                // emergency
+                'emergency_name'  => $data['emergency_name']  ?? null,
+                'emergency_phone' => $data['emergency_phone'] ?? null,
+                // professional
+                'position'        => $data['position']        ?? null,
+                'degree'          => $data['degree']          ?? null,
+                'specialization'  => $data['specialization']  ?? null,
+                'contract_type'   => $data['contract_type']   ?? null,
+                'salary_type'     => $data['salary_type']     ?? null,
+                'salary'          => $data['salary']          ?? null,
+                'experience'      => $data['experience']      ?? null,
+                'join_date'       => $data['join_date']       ?? null,
+                'note'            => $data['note']            ?? null,
+                // auth
+                'role'            => 'Teacher',
+                'otp_code'        => null,
+                'otp_expires_at'  => null,
+                'is_verified'     => true,
+                'verified_at'     => now(),
+            ]);
+            
+            // Also create a User account so the teacher appears in User Management
+            $teacherRole = Role::where('name', 'Teacher')->first();
+            $roleId = $teacherRole?->id ?? 3; // Default to 3 if Teacher role not found
+            
+            User::create([
+                'username'      => $data['username'],
+                'password_hash' => Hash::make($data['password']),
+                'role_id'       => $roleId,
+                'status'        => 'Active',
+                'full_name'     => $data['first_name'] . ' ' . $data['last_name'],
+                'phone'         => $data['phone_number'] ?? null,
+                'image'         => $imagePath,
             ]);
             
             return $teacher->load(['major', 'subject']);

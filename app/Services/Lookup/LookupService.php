@@ -100,8 +100,8 @@ class LookupService extends BaseService
                             ->select('subject_id')
                     );
                 })
-                ->select('id', 'subject_Code', 'name_eg', 'name_kh')
-                ->orderBy('name_eg')
+                ->select('id', 'subject_Code', 'name')
+                ->orderBy('name')
                 ->get());
         });
     }
@@ -127,10 +127,8 @@ class LookupService extends BaseService
                 'major_id' => $majorId,
                 'shift_id' => $shiftId,
             ], fn () => Classes::query()
-                ->when(!is_null($majorId), fn ($query) => $query->where('major_id', $majorId))
-                ->when(!is_null($shiftId), fn ($query) => $query->where('shift_id', $shiftId))
-                ->select('id', 'code', 'major_id', 'shift_id', 'academic_year', 'year_level', 'semester', 'section', 'is_active')
-                ->orderBy('code')
+                ->select('id', 'name')
+                ->orderBy('name')
                 ->get());
         });
     }

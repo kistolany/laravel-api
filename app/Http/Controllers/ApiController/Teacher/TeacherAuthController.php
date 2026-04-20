@@ -23,6 +23,28 @@ class TeacherAuthController extends Controller
     {
     }
 
+    public function index(): JsonResponse
+    {
+        $teachers = \App\Models\Teacher::with(['major', 'subject'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return $this->success(TeacherResource::collection($teachers), 'Teachers retrieved successfully.');
+    }
+
+    public function destroy(int $id): JsonResponse
+    {
+        $teacher = \App\Models\Teacher::find($id);
+
+        if (!$teacher) {
+            return $this->error('Teacher not found.', \App\Enums\ResponseStatus::NOT_FOUND);
+        }
+
+        $teacher->delete();
+
+        return $this->success(null, 'Teacher deleted successfully.');
+    }
+
     public function register(TeacherRequest $request): JsonResponse
     {
         try {

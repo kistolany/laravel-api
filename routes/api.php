@@ -75,6 +75,8 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::prefix('teacher-auth')->group(function () {
+        Route::get('list', [TeacherAuthController::class, 'index']);
+        Route::delete('{id}', [TeacherAuthController::class, 'destroy']);
         Route::post('register', [TeacherAuthController::class, 'register']);
         Route::post('upload-image', [TeacherAuthController::class, 'uploadImage']);
         Route::post('login', [TeacherAuthController::class, 'login'])->middleware('throttle:login');

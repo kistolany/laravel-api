@@ -98,6 +98,11 @@ class PermissionSeeder extends Seeder
             'commune.create',
             'commune.update',
             'commune.delete',
+
+            'class_schedule.view',
+            'class_schedule.create',
+            'class_schedule.update',
+            'class_schedule.delete',
         ];
 
         foreach ($permissions as $permission) {

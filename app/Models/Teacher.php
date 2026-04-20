@@ -14,9 +14,15 @@ class Teacher extends Authenticatable
     protected $table = 'teachers';
 
     protected $fillable = [
+        'teacher_id',
         'first_name',
         'last_name',
         'gender',
+        'dob',
+        'nationality',
+        'religion',
+        'marital_status',
+        'national_id',
         'major_id',
         'subject_id',
         'email',
@@ -26,6 +32,17 @@ class Teacher extends Authenticatable
         'telegram',
         'image',
         'address',
+        'position',
+        'degree',
+        'specialization',
+        'contract_type',
+        'salary_type',
+        'salary',
+        'experience',
+        'join_date',
+        'emergency_name',
+        'emergency_phone',
+        'note',
         'role',
         'otp_code',
         'otp_expires_at',
@@ -41,11 +58,15 @@ class Teacher extends Authenticatable
     protected function casts(): array
     {
         return [
-            'major_id' => 'integer',
-            'subject_id' => 'integer',
-            'is_verified' => 'boolean',
-            'otp_expires_at' => 'datetime',
-            'verified_at' => 'datetime',
+            'major_id'      => 'integer',
+            'subject_id'    => 'integer',
+            'experience'    => 'integer',
+            'salary'        => 'decimal:2',
+            'dob'           => 'date',
+            'join_date'     => 'date',
+            'is_verified'   => 'boolean',
+            'otp_expires_at'=> 'datetime',
+            'verified_at'   => 'datetime',
         ];
     }
 

@@ -120,13 +120,15 @@ class FacultyService extends BaseService
     public function delete($id): bool
     {
         return $this->trace(__FUNCTION__, function () use ($id): bool {
-            // check this id before delete
             $faculty = $this->findById($id);
-            
-            // perform delete
-            return $faculty->delete($faculty);
-            
-            
+
+            // delete major_subjects → majors first to satisfy FK constraints
+            foreach ($faculty->majors as $major) {
+                $major->majorSubjects()->delete();
+            }
+            $faculty->majors()->delete();
+
+            return $faculty->delete();
         });
     }
 
