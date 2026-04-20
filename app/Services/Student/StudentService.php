@@ -9,12 +9,14 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Student\StudentResource;
 use App\Models\Students;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+
 class StudentService extends BaseService
 {
     /**
@@ -103,11 +105,27 @@ class StudentService extends BaseService
      * Get only PAY or PASS students with pagination.
      * Optional query params:
      *   major_id, shift_id, faculty_id, stage, batch_year, study_days,
-     *   class_id, search, per_page
+     *   class_id, search, size
      */
     public function payOrPass(): PaginatedResult
     {
-        return $this->trace(__FUNCTION__, function (): PaginatedResult {
+        return $this->studentsByTypes(['PAY', 'PASS'], __FUNCTION__);
+    }
+
+    /**
+     * Get only PASS students with pagination.
+     * Optional query params match payOrPass():
+     *   major_id, shift_id, faculty_id, stage, batch_year, study_days,
+     *   class_id, search, size
+     */
+    public function passStudents(): PaginatedResult
+    {
+        return $this->studentsByTypes(['PASS'], __FUNCTION__);
+    }
+
+    private function studentsByTypes(array $studentTypes, string $traceName): PaginatedResult
+    {
+        return $this->trace($traceName, function () use ($studentTypes): PaginatedResult {
             $query = Students::with([
                 'academicInfo.major.faculty',
                 'academicInfo.shift',
@@ -115,56 +133,62 @@ class StudentService extends BaseService
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'registration',
                 'classes',
-            ])->whereIn('student_type', ['PAY', 'PASS']);
+            ])->whereIn('student_type', $studentTypes);
 
-            // Filter by major
-            $query->when(request('major_id'), function ($q, $majorId) {
-                $q->whereHas('academicInfo', fn($sub) => $sub->where('major_id', $majorId));
-            });
-
-            // Filter by shift
-            $query->when(request('shift_id'), function ($q, $shiftId) {
-                $q->whereHas('academicInfo', fn($sub) => $sub->where('shift_id', $shiftId));
-            });
-
-            // Filter by faculty (via major)
-            $query->when(request('faculty_id'), function ($q, $facultyId) {
-                $q->whereHas('academicInfo.major', fn($sub) => $sub->where('faculty_id', $facultyId));
-            });
-
-            // Filter by stage (year level e.g. "Year 1")
-            $query->when(request('stage'), function ($q, $stage) {
-                $q->whereHas('academicInfo', fn($sub) => $sub->where('stage', $stage));
-            });
-
-            // Filter by batch year
-            $query->when(request('batch_year'), function ($q, $batchYear) {
-                $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $batchYear));
-            });
-
-            // Filter by study_days (study year / schedule)
-            $query->when(request('study_days'), function ($q, $studyDays) {
-                $q->whereHas('academicInfo', fn($sub) => $sub->where('study_days', $studyDays));
-            });
-
-            // Filter by class: "none" = no class assigned, otherwise filter by class id
-            if (request('class_id') === 'none') {
-                $query->whereDoesntHave('classes');
-            } elseif (request('class_id')) {
-                $query->whereHas('classes', fn($sub) => $sub->where('classes.id', request('class_id')));
-            }
-
-            // Search by name or barcode
-            $query->when(request('search'), function ($q, $search) {
-                $q->where(function ($sub) use ($search) {
-                    $sub->where('full_name_en', 'like', "%{$search}%")
-                        ->orWhere('full_name_kh', 'like', "%{$search}%")
-                        ->orWhere('id', 'like', "%{$search}%");
-                });
-            });
+            $this->applyStudentListFilters($query);
 
             return $this->paginateResponse($query->latest(), StudentResource::class);
+        });
+    }
+
+    private function applyStudentListFilters(Builder $query): void
+    {
+        // Filter by major
+        $query->when(request('major_id'), function ($q, $majorId) {
+            $q->whereHas('academicInfo', fn($sub) => $sub->where('major_id', $majorId));
+        });
+
+        // Filter by shift
+        $query->when(request('shift_id'), function ($q, $shiftId) {
+            $q->whereHas('academicInfo', fn($sub) => $sub->where('shift_id', $shiftId));
+        });
+
+        // Filter by faculty (via major)
+        $query->when(request('faculty_id'), function ($q, $facultyId) {
+            $q->whereHas('academicInfo.major', fn($sub) => $sub->where('faculty_id', $facultyId));
+        });
+
+        // Filter by stage (year level e.g. "Year 1")
+        $query->when(request('stage'), function ($q, $stage) {
+            $q->whereHas('academicInfo', fn($sub) => $sub->where('stage', $stage));
+        });
+
+        // Filter by batch year
+        $query->when(request('batch_year'), function ($q, $batchYear) {
+            $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $batchYear));
+        });
+
+        // Filter by study_days (study year / schedule)
+        $query->when(request('study_days'), function ($q, $studyDays) {
+            $q->whereHas('academicInfo', fn($sub) => $sub->where('study_days', $studyDays));
+        });
+
+        // Filter by class: "none" = no class assigned, otherwise filter by class id
+        if (request('class_id') === 'none') {
+            $query->whereDoesntHave('classes');
+        } elseif (request('class_id')) {
+            $query->whereHas('classes', fn($sub) => $sub->where('classes.id', request('class_id')));
+        }
+
+        // Search by name or barcode
+        $query->when(request('search'), function ($q, $search) {
+            $q->where(function ($sub) use ($search) {
+                $sub->where('full_name_en', 'like', "%{$search}%")
+                    ->orWhere('full_name_kh', 'like', "%{$search}%")
+                    ->orWhere('id', 'like', "%{$search}%");
+            });
         });
     }
 

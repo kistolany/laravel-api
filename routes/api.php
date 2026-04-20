@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ApiController\AcademicInfo\AcademicInfoController;
 use App\Http\Controllers\ApiController\Auth\AuthController;
+use App\Http\Controllers\ApiController\Dashboard\DashboardController;
 use App\Http\Controllers\ApiController\AuditLog\AuditLogController;
 use App\Http\Controllers\ApiController\Attendance\AttendanceSessionController;
 use App\Http\Controllers\ApiController\Address\CommuneController;
@@ -18,6 +19,7 @@ use App\Http\Controllers\ApiController\Shift\ShiftController;
 use App\Http\Controllers\ApiController\Student\StudentController;
 use App\Http\Controllers\ApiController\Student\StudentCardController;
 use App\Http\Controllers\ApiController\Scholarship\ScholarshipController;
+use App\Http\Controllers\ApiController\Score\StudentScoreController;
 use App\Http\Controllers\ApiController\Student\StudentRegistrationController;
 use App\Http\Controllers\ApiController\Subject\SubjectController;
 use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
@@ -91,6 +93,8 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::middleware('auth.jwt')->group(function () {
+        Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+
         // Role & Permission management (Admin only)
         Route::middleware('role:Admin')->group(function () {
             Route::apiResource('roles', RoleController::class);
@@ -100,6 +104,7 @@ Route::prefix('v1')->group(function () {
 
         // Student routes
         Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
+        Route::get('students/pass', [StudentController::class, 'passStudents'])->middleware('permission:student.view');
         Route::get('students/pending', [StudentController::class, 'pendingStudents'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['index', 'show'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['store'])->middleware('permission:student.create');
@@ -119,8 +124,11 @@ Route::prefix('v1')->group(function () {
         Route::post('classes', [ClassController::class, 'store'])->middleware('permission:class.create');
         Route::get('classes', [ClassController::class, 'index'])->middleware('permission:class.view');
         Route::get('classes/{id}', [ClassController::class, 'show'])->middleware('permission:class.view');
+        Route::put('classes/{id}', [ClassController::class, 'update'])->middleware('permission:class.create');
         Route::delete('classes/{id}', [ClassController::class, 'destroy'])->middleware('permission:class.delete');
         Route::get('classes/{id}/students', [ClassController::class, 'students'])->middleware('permission:class.students.view');
+        Route::post('classes/{id}/programs', [ClassController::class, 'addProgram'])->middleware('permission:class.create');
+        Route::delete('classes/{id}/programs/{programId}', [ClassController::class, 'removeProgram'])->middleware('permission:class.create');
         Route::get('classes/{id}/subjects', [ClassController::class, 'subjects'])->middleware('permission:class.subjects.view');
         Route::post('classes/{id}/students', [ClassController::class, 'addStudent'])->middleware('permission:class.students.add');
         Route::delete('classes/{id}/students/{studentId}', [ClassController::class, 'removeStudent'])->middleware('permission:class.students.add');
@@ -141,6 +149,10 @@ Route::prefix('v1')->group(function () {
         Route::get('attendance-sessions/{id}', [AttendanceSessionController::class, 'show'])->middleware('permission:attendance.view');
         Route::post('attendance-sessions', [AttendanceSessionController::class, 'store'])->middleware('permission:attendance.create');
         Route::post('attendance-sessions/{id}/records', [AttendanceSessionController::class, 'record'])->middleware('permission:attendance.record');
+
+        // Student score routes
+        Route::get('student-scores', [StudentScoreController::class, 'index'])->middleware('permission:student.view');
+        Route::post('student-scores/bulk', [StudentScoreController::class, 'bulkUpsert'])->middleware('permission:student.update');
 
         // Major routes
         Route::get('majors', [MajorController::class, 'index'])->middleware('permission:major.view');

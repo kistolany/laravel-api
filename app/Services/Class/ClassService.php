@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Class\ClassResource;
 use App\Models\Classes;
+use App\Models\ClassProgram;
 use App\Models\Students;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -18,11 +19,9 @@ class ClassService extends BaseService
     public function index(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = Classes::query()->withCount('classStudents')->latest();
+            $query = Classes::query()->with(['programs.major', 'programs.shift'])->withCount('classStudents')->latest();
 
             return $this->paginateResponse($query, ClassResource::class);
-            
-            
         });
     }
 
@@ -30,8 +29,8 @@ class ClassService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($id, $withStudents): Classes {
             $query = Classes::query();
-            
-            $query->with(['major', 'shift']);
+
+            $query->with(['major', 'shift', 'programs.major', 'programs.shift']);
             if ($withStudents) {
                 $query->with(['students.academicInfo.major']);
             }
@@ -63,6 +62,16 @@ class ClassService extends BaseService
         });
     }
 
+    public function update(int $id, array $data): Classes
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $data): Classes {
+            $validatedData = $this->validateExisting($data, $id);
+            $class = $this->findById($id);
+            $class->update($validatedData);
+            return $class;
+        });
+    }
+
     public function delete(int $id): void
     {
         $this->trace(__FUNCTION__, function () use ($id): void {
@@ -71,6 +80,36 @@ class ClassService extends BaseService
             $class->schedules()->delete();
             $class->attendanceSessions()->delete();
             $class->delete();
+        });
+    }
+
+    public function addProgram(int $classId, array $data): ClassProgram
+    {
+        return $this->trace(__FUNCTION__, function () use ($classId, $data): ClassProgram {
+            $validator = Validator::make($data, [
+                'major_id'   => 'nullable|exists:majors,id',
+                'shift_id'   => 'nullable|exists:shifts,id',
+                'year_level' => 'nullable|integer|min:1|max:6',
+                'semester'   => 'nullable|integer|min:1|max:2',
+            ]);
+            if ($validator->fails()) {
+                throw new ApiException(ResponseStatus::BAD_REQUEST, $validator->errors()->first());
+            }
+            $class = $this->findById($classId);
+            $program = $class->programs()->create($validator->validated());
+            $program->load(['major', 'shift']);
+            return $program;
+        });
+    }
+
+    public function removeProgram(int $classId, int $programId): void
+    {
+        $this->trace(__FUNCTION__, function () use ($classId, $programId): void {
+            $program = ClassProgram::where('class_id', $classId)->where('id', $programId)->first();
+            if (!$program) {
+                throw new ApiException(ResponseStatus::NOT_FOUND, "Program not found.");
+            }
+            $program->delete();
         });
     }
 
@@ -181,7 +220,15 @@ class ClassService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = Validator::make($data, [
-            'name' => 'required|string|max:255',
+            'name'          => 'required|string|max:255',
+            'major_id'      => 'nullable|exists:majors,id',
+            'shift_id'      => 'nullable|exists:shifts,id',
+            'academic_year' => 'nullable|string|max:20',
+            'year_level'    => 'nullable|integer|min:1|max:6',
+            'semester'      => 'nullable|integer|min:1|max:2',
+            'section'       => 'nullable|string|max:50',
+            'max_students'  => 'nullable|integer|min:1',
+            'is_active'     => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {

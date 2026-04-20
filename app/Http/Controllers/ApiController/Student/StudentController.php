@@ -38,6 +38,14 @@ class StudentController extends Controller
     }
 
     /**
+     * Display only students with student_type PASS.
+     */
+    public function passStudents()
+    {
+        return $this->success($this->service->passStudents());
+    }
+
+    /**
      * Display only students with student_type PENDING (scholarship waiting for exam result).
      */
     public function pendingStudents()
@@ -136,4 +144,3 @@ class StudentController extends Controller
         return $this->success(StudentClassResource::collection($student->classes));
     }
 }
-

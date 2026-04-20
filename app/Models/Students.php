@@ -51,12 +51,22 @@ class Students extends Model
         return $this->hasOne(ParentGuardian::class, 'student_id', 'id');
     }
 
+    public function registration(): HasOne
+    {
+        return $this->hasOne(StudentRegistration::class, 'student_id', 'id');
+    }
+
     public function classes(): BelongsToMany
     {
         return $this->belongsToMany(Classes::class, 'class_students', 'student_id', 'class_id')
             ->using(ClassStudent::class)
             ->withPivot(['joined_date', 'left_date', 'status'])
             ->withTimestamps();
+    }
+
+    public function scores(): HasMany
+    {
+        return $this->hasMany(StudentScore::class, 'student_id', 'id');
     }
 
     public function getBarcodeAttribute(): string

@@ -8,7 +8,9 @@ use App\Http\Requests\Class\ClassRequest;
 use App\Http\Requests\Class\ClassSubjectAssignRequest;
 use App\Http\Requests\Class\ClassStudentRequest;
 use App\Http\Resources\Class\ClassResource;
+use App\Http\Resources\Class\ClassProgramResource;
 use App\Http\Resources\Class\ClassStudentResource;
+use Illuminate\Http\Request;
 use App\Services\Class\ClassService;
 use App\Services\Major\Major_subject_service;
 use App\Traits\ApiResponseTrait;
@@ -29,14 +31,22 @@ class ClassController extends Controller
 
     public function store(ClassRequest $request)
     {
-        $this->service->create($request->all());
-        return $this->success("Class created successfully!");
+        $class = $this->service->create($request->validated());
+        $class->load(['major', 'shift']);
+        return $this->success(new ClassResource($class), "Class created successfully!");
     }
 
     public function show($id)
     {
         $class = $this->service->findById($id, true);
         return $this->success(new ClassResource($class));
+    }
+
+    public function update(ClassRequest $request, $id)
+    {
+        $class = $this->service->update((int) $id, $request->validated());
+        $class->load(['major', 'shift']);
+        return $this->success(new ClassResource($class), "Class updated successfully!");
     }
 
     public function destroy($id)
@@ -53,6 +63,18 @@ class ClassController extends Controller
         $collection = ClassStudentResource::collection($class->students);
         $collection->each(fn($r) => $r->additional(['class_name' => $className]));
         return $this->success($collection);
+    }
+
+    public function addProgram(Request $request, $id)
+    {
+        $program = $this->service->addProgram((int) $id, $request->all());
+        return $this->success(new ClassProgramResource($program), "Program added successfully!");
+    }
+
+    public function removeProgram($id, $programId)
+    {
+        $this->service->removeProgram((int) $id, (int) $programId);
+        return $this->success(null, "Program removed successfully!");
     }
 
     public function addStudent(ClassStudentRequest $request, $id)

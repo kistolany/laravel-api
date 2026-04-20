@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Class;
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Http\Resources\Class\ClassProgramResource;
 
 class ClassResource extends JsonResource
 {
@@ -27,6 +28,7 @@ class ClassResource extends JsonResource
                 'name'       => $this->shift->name,
                 'time_range' => $this->shift->time_range ?? null,
             ]),
+            'programs'      => ClassProgramResource::collection($this->whenLoaded('programs')),
             'student_count' => $this->class_students_count ?? ($this->relationLoaded('students') ? $this->students->count() : $this->classStudents()->count()),
             'students'      => ClassStudentResource::collection($this->whenLoaded('students')),
         ];

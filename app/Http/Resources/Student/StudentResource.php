@@ -34,6 +34,7 @@ class StudentResource extends JsonResource
             'academic_details'  => $this->whenLoaded('academicInfo', fn() => new AcademicInfoResource($this->academicInfo)),
             'addresses'         => AddressResource::collection($this->whenLoaded('addresses')),
             'parent_guardian'   => new ParentGuardianResource($this->whenLoaded('parentGuardian')),
+            'registration'      => new StudentRegistrationResource($this->whenLoaded('registration')),
             'classes'           => StudentClassResource::collection($this->whenLoaded('classes')),
 
             // Safety check: only format if the timestamp exists
