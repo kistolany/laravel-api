@@ -121,9 +121,19 @@ class LookupController extends Controller
         return $this->success($this->service->getAcademicYears());
     }
 
+    public function semesters()
+    {
+        return $this->success($this->service->getSemesters());
+    }
+
     public function studyDays()
     {
         return $this->success($this->service->getStudyDays());
+    }
+
+    public function scoreFilters()
+    {
+        return $this->success($this->service->getScoreFilters());
     }
 
     public function teachers()

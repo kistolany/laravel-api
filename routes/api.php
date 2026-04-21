@@ -48,7 +48,9 @@ Route::prefix('v1')->group(function () {
         Route::get('stages', [LookupController::class, 'stages']);
         Route::get('batch-years', [LookupController::class, 'batchYears']);
         Route::get('academic-years', [LookupController::class, 'academicYears']);
+        Route::get('semesters', [LookupController::class, 'semesters']);
         Route::get('study-days', [LookupController::class, 'studyDays']);
+        Route::get('score-filters', [LookupController::class, 'scoreFilters']);
         Route::get('provinces', [LookupController::class, 'provinces']);
         Route::get('districts', [LookupController::class, 'districts']);
         Route::get('communes', [LookupController::class, 'communes']);

@@ -4,7 +4,9 @@ namespace App\Services\Lookup;
 
 use App\Services\BaseService;
 
+use App\Models\AcademicInfo;
 use App\Models\Classes;
+use App\Models\ClassProgram;
 use App\Models\Commune;
 use App\Models\District;
 use App\Models\Faculty;
@@ -16,6 +18,7 @@ use App\Models\StudentScore;
 use App\Models\Subject;
 use App\Models\Teacher;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 class LookupService extends BaseService
 {
     /**
@@ -163,7 +166,7 @@ class LookupService extends BaseService
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
             return $this->rememberLookup($fn, [], fn () =>
-                \App\Models\AcademicInfo::select('stage')
+                AcademicInfo::select('stage')
                     ->distinct()
                     ->whereNotNull('stage')
                     ->orderBy('stage')
@@ -179,7 +182,7 @@ class LookupService extends BaseService
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
             return $this->rememberLookup($fn, [], fn () =>
-                \App\Models\AcademicInfo::select('batch_year')
+                AcademicInfo::select('batch_year')
                     ->distinct()
                     ->whereNotNull('batch_year')
                     ->orderByDesc('batch_year')
@@ -194,17 +197,62 @@ class LookupService extends BaseService
     {
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
-            return $this->rememberLookup($fn, [], fn () =>
-                collect()
-                    ->merge(Classes::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'))
-                    ->merge(StudentScore::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'))
+            return $this->rememberLookup($fn, [], function (): array {
+                $values = collect();
+
+                if (Schema::hasColumn((new Classes())->getTable(), 'academic_year')) {
+                    $values = $values->merge(Classes::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'));
+                }
+
+                if (Schema::hasColumn((new StudentScore())->getTable(), 'academic_year')) {
+                    $values = $values->merge(StudentScore::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'));
+                }
+
+                return $values
                     ->filter()
                     ->unique()
                     ->sortDesc()
                     ->values()
                     ->map(fn ($value) => ['value' => (string) $value, 'label' => (string) $value])
-                    ->toArray()
-            );
+                    ->toArray();
+            });
+        });
+    }
+
+    public function getSemesters(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], function (): array {
+                $values = collect();
+
+                if (Schema::hasColumn((new Classes())->getTable(), 'semester')) {
+                    $values = $values->merge(Classes::query()->whereNotNull('semester')->distinct()->pluck('semester'));
+                }
+
+                if (Schema::hasColumn((new ClassProgram())->getTable(), 'semester')) {
+                    $values = $values->merge(ClassProgram::query()->whereNotNull('semester')->distinct()->pluck('semester'));
+                }
+
+                if (Schema::hasColumn((new StudentScore())->getTable(), 'semester')) {
+                    $values = $values->merge(StudentScore::query()->whereNotNull('semester')->distinct()->pluck('semester'));
+                }
+
+                $values = $values
+                    ->filter(fn ($value) => $value !== null && $value !== '')
+                    ->map(fn ($value) => (string) $value)
+                    ->unique()
+                    ->sortBy(fn ($value) => is_numeric($value) ? (int) $value : $value)
+                    ->values();
+
+                if ($values->isEmpty()) {
+                    $values = collect(['1', '2']);
+                }
+
+                return $values
+                    ->map(fn ($value) => ['value' => $value, 'label' => $value])
+                    ->toArray();
+            });
         });
     }
 
@@ -213,7 +261,7 @@ class LookupService extends BaseService
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
             return $this->rememberLookup($fn, [], fn () =>
-                \App\Models\AcademicInfo::select('study_days')
+                AcademicInfo::select('study_days')
                     ->distinct()
                     ->whereNotNull('study_days')
                     ->orderBy('study_days')
@@ -221,6 +269,48 @@ class LookupService extends BaseService
                     ->map(fn ($v) => ['value' => $v, 'label' => $v])
                     ->toArray()
             );
+        });
+    }
+
+    public function getScoreFilters(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn (): array => [
+                'stages' => $this->getStages(),
+                'batch-years' => $this->getBatchYears(),
+                'semesters' => $this->getSemesters(),
+                'academic-years' => $this->getAcademicYears(),
+                'faculties' => Faculty::query()
+                    ->select('id', 'name')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Faculty $faculty) => [
+                        'id' => $faculty->id,
+                        'name' => $faculty->name,
+                    ])
+                    ->all(),
+                'majors' => Major::query()
+                    ->select('id', 'faculty_id', 'name')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Major $major) => [
+                        'id' => $major->id,
+                        'faculty_id' => $major->faculty_id,
+                        'name' => $major->name,
+                    ])
+                    ->all(),
+                'shifts' => Shift::query()
+                    ->select('id', 'name', 'time_range')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Shift $shift) => [
+                        'id' => $shift->id,
+                        'name' => $shift->name,
+                        'time_range' => $shift->time_range,
+                    ])
+                    ->all(),
+            ]);
         });
     }
 

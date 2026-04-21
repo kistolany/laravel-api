@@ -12,16 +12,28 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('shifts', function (Blueprint $table) {
-            $table->renameColumn('name_en', 'name');
-            $table->dropColumn('name_kh');
+            if (Schema::hasColumn('shifts', 'name_en') && !Schema::hasColumn('shifts', 'name')) {
+                $table->renameColumn('name_en', 'name');
+            } elseif (Schema::hasColumn('shifts', 'name_eg') && !Schema::hasColumn('shifts', 'name')) {
+                $table->renameColumn('name_eg', 'name');
+            }
+
+            if (Schema::hasColumn('shifts', 'name_kh')) {
+                $table->dropColumn('name_kh');
+            }
         });
     }
 
     public function down(): void
     {
         Schema::table('shifts', function (Blueprint $table) {
-            $table->renameColumn('name', 'name_en');
-            $table->string('name_kh')->after('id');
+            if (Schema::hasColumn('shifts', 'name') && !Schema::hasColumn('shifts', 'name_en')) {
+                $table->renameColumn('name', 'name_en');
+            }
+
+            if (!Schema::hasColumn('shifts', 'name_kh')) {
+                $table->string('name_kh')->after('id');
+            }
         });
     }
 };

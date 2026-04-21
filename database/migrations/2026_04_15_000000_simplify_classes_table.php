@@ -11,6 +11,15 @@ return new class extends Migration
         Schema::table('classes', function (Blueprint $table) {
             $table->dropForeign(['major_id']);
             $table->dropForeign(['shift_id']);
+
+            if (Schema::hasColumn('classes', 'code')) {
+                $table->dropUnique('classes_code_unique');
+            }
+
+            if (Schema::hasColumn('classes', 'major_id')) {
+                $table->dropIndex('classes_lookup_idx');
+            }
+
             $table->dropColumn([
                 'code',
                 'major_id',
