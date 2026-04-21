@@ -22,6 +22,11 @@ class StudentScoreController extends Controller
         return $this->success($this->service->index($request->query()), 'Student scores retrieved successfully.');
     }
 
+    public function gradeBook(Request $request): JsonResponse
+    {
+        return $this->success($this->service->gradeBook($request->query()), 'Grade book retrieved successfully.');
+    }
+
     public function finalResults(Request $request): JsonResponse
     {
         return $this->success($this->service->finalResults($request->query()), 'Final score results retrieved successfully.');

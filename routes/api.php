@@ -160,6 +160,7 @@ Route::prefix('v1')->group(function () {
         Route::post('attendance-sessions/{id}/records', [AttendanceSessionController::class, 'record'])->middleware('permission:attendance.record');
 
         // Student score routes
+        Route::get('student-scores/grade-book', [StudentScoreController::class, 'gradeBook'])->middleware('permission:student.view');
         Route::get('student-scores/final-results', [StudentScoreController::class, 'finalResults'])->middleware('permission:student.view');
         Route::get('student-scores', [StudentScoreController::class, 'index'])->middleware('permission:student.view');
         Route::post('student-scores/bulk', [StudentScoreController::class, 'bulkUpsert'])->middleware('permission:student.update');

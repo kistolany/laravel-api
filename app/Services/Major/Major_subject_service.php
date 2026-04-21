@@ -52,15 +52,34 @@ class Major_subject_service extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($classId) {
             $class = $this->findClass($classId);
-            
+
+            // A class can have multiple programs (major+year+semester via class_programs)
+            // Collect all subject slots that match any of the class's programs
+            $programs = $class->programs()->get();
+
+            if ($programs->isEmpty()) {
+                // Fallback to classes.major_id if no programs defined
+                return MajorSubject::with(['major', 'subject'])
+                    ->where('major_id', $class->major_id)
+                    ->when($class->year_level, fn ($q) => $q->where('year_level', $class->year_level))
+                    ->when($class->semester,   fn ($q) => $q->where('semester',   $class->semester))
+                    ->orderBy('year_level')->orderBy('semester')->orderBy('subject_id')
+                    ->get();
+            }
+
+            // Build OR conditions for each program
             return MajorSubject::with(['major', 'subject'])
-                ->where('major_id', $class->major_id)
-                ->where('year_level', $class->year_level)
-                ->where('semester', $class->semester)
-                ->orderBy('subject_id')
+                ->where(function ($query) use ($programs) {
+                    foreach ($programs as $program) {
+                        $query->orWhere(function ($q) use ($program) {
+                            $q->where('major_id', $program->major_id)
+                              ->when($program->year_level, fn ($q) => $q->where('year_level', $program->year_level))
+                              ->when($program->semester,   fn ($q) => $q->where('semester',   $program->semester));
+                        });
+                    }
+                })
+                ->orderBy('major_id')->orderBy('year_level')->orderBy('semester')->orderBy('subject_id')
                 ->get();
-            
-            
         });
     }
 
@@ -121,14 +140,17 @@ class Major_subject_service extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($classId, $data): MajorSubject {
             $class = $this->findClass($classId);
-            
-            return $this->create(array_merge($data, [
-                'major_id' => $class->major_id,
-                'year_level' => $class->year_level,
-                'semester' => $class->semester,
-            ]));
-            
-            
+
+            // If major_id/year_level/semester provided in data, use them directly
+            // Otherwise resolve from class programs (preferred) or class columns
+            if (empty($data['major_id'])) {
+                $program = $class->programs()->first();
+                $data['major_id']   = $program?->major_id   ?? $class->major_id;
+                $data['year_level'] = $data['year_level']   ?? $program?->year_level ?? $class->year_level;
+                $data['semester']   = $data['semester']     ?? $program?->semester   ?? $class->semester;
+            }
+
+            return $this->create($data);
         });
     }
 

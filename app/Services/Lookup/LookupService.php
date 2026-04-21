@@ -87,17 +87,26 @@ class LookupService extends BaseService
         });
     }
 
-    public function getSubjectsByMajor(mixed $majorId = null)
+    public function getSubjectsByMajor(mixed $majorId = null, mixed $yearLevel = null, mixed $semester = null)
     {
         $fn = __FUNCTION__;
-        return $this->trace($fn, function () use ($fn, $majorId) {
-            $majorId = $this->toNullableInt($majorId);
-            return $this->rememberLookup($fn, ['major_id' => $majorId], fn () => Subject::query()
-                ->when(!is_null($majorId), function ($query) use ($majorId) {
+        return $this->trace($fn, function () use ($fn, $majorId, $yearLevel, $semester) {
+            $majorId   = $this->toNullableInt($majorId);
+            $yearLevel = $this->toNullableInt($yearLevel);
+            $semester  = $this->toNullableInt($semester);
+
+            return $this->rememberLookup($fn, [
+                'major_id'   => $majorId,
+                'year_level' => $yearLevel,
+                'semester'   => $semester,
+            ], fn () => Subject::query()
+                ->when(!is_null($majorId), function ($query) use ($majorId, $yearLevel, $semester) {
                     $query->whereIn(
                         'id',
                         MajorSubject::query()
                             ->where('major_id', $majorId)
+                            ->when($yearLevel, fn ($q) => $q->where('year_level', $yearLevel))
+                            ->when($semester,  fn ($q) => $q->where('semester',   $semester))
                             ->select('subject_id')
                     );
                 })
@@ -118,16 +127,31 @@ class LookupService extends BaseService
         });
     }
 
-    public function getClasses(mixed $majorId = null, mixed $shiftId = null)
+    public function getClasses(mixed $majorId = null, mixed $shiftId = null, mixed $yearLevel = null, mixed $semester = null)
     {
         $fn = __FUNCTION__;
-        return $this->trace($fn, function () use ($fn, $majorId, $shiftId) {
-            $majorId = $this->toNullableInt($majorId);
-            $shiftId = $this->toNullableInt($shiftId);
+        return $this->trace($fn, function () use ($fn, $majorId, $shiftId, $yearLevel, $semester) {
+            // All four params must be integers to match the DB column types (unsignedTinyInteger / unsignedBigInteger)
+            $majorId   = $this->toNullableInt($majorId);
+            $shiftId   = $this->toNullableInt($shiftId);
+            $yearLevel = $this->toNullableInt($yearLevel);
+            $semester  = $this->toNullableInt($semester);
+
             return $this->rememberLookup($fn, [
-                'major_id' => $majorId,
-                'shift_id' => $shiftId,
+                'major_id'   => $majorId,
+                'shift_id'   => $shiftId,
+                'year_level' => $yearLevel,
+                'semester'   => $semester,
             ], fn () => Classes::query()
+                // A class can serve multiple majors via class_programs — filter through that relationship
+                ->when($majorId || $shiftId || $yearLevel || $semester, function ($q) use ($majorId, $shiftId, $yearLevel, $semester) {
+                    $q->whereHas('programs', function ($pq) use ($majorId, $shiftId, $yearLevel, $semester) {
+                        $pq->when($majorId,   fn ($q) => $q->where('major_id',   $majorId))
+                           ->when($shiftId,   fn ($q) => $q->where('shift_id',   $shiftId))
+                           ->when($yearLevel, fn ($q) => $q->where('year_level', $yearLevel))
+                           ->when($semester,  fn ($q) => $q->where('semester',   $semester));
+                    });
+                })
                 ->select('id', 'name')
                 ->orderBy('name')
                 ->get());

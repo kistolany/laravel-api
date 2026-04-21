@@ -66,7 +66,11 @@ class LookupController extends Controller
      */
     public function subjects(Request $request)
     {
-        $data = $this->service->getSubjectsByMajor($request->query('major_id'));
+        $data = $this->service->getSubjectsByMajor(
+            $request->query('major_id'),
+            $request->query('year_level'),
+            $request->query('semester'),
+        );
 
         return $this->success($data);
     }
@@ -86,7 +90,9 @@ class LookupController extends Controller
     {
         $data = $this->service->getClasses(
             $request->query('major_id'),
-            $request->query('shift_id')
+            $request->query('shift_id'),
+            $request->query('year_level'),
+            $request->query('semester'),
         );
 
         return $this->success($data);
