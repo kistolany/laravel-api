@@ -310,6 +310,17 @@ class LookupService extends BaseService
                         'time_range' => $shift->time_range,
                     ])
                     ->all(),
+                'classes' => Classes::query()
+                    ->select('id', 'name', 'major_id', 'shift_id')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Classes $class) => [
+                        'id' => $class->id,
+                        'name' => $class->name,
+                        'major_id' => $class->major_id,
+                        'shift_id' => $class->shift_id,
+                    ])
+                    ->all(),
             ]);
         });
     }

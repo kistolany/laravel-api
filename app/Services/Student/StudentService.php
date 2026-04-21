@@ -135,7 +135,8 @@ class StudentService extends BaseService
                 'parentGuardian',
                 'registration',
                 'classes',
-            ])->whereIn('student_type', $studentTypes);
+            ])->whereIn('student_type', $studentTypes)
+              ->where('status', 'active');
 
             $this->applyStudentListFilters($query);
 
