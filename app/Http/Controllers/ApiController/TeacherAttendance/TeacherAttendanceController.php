@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 
 class TeacherAttendanceController extends Controller
 {
@@ -20,13 +21,21 @@ class TeacherAttendanceController extends Controller
     {
         $date = $request->query('date', now()->toDateString());
 
-        $teachers = Teacher::with(['major', 'subject'])
-            ->orderBy('first_name')
+        $attendanceRecords = TeacherAttendance::query()
+            ->select('id', 'teacher_id', 'status', 'check_in_time', 'check_out_time', 'note')
+            ->where('attendance_date', $date)
             ->get()
-            ->map(function (Teacher $t) use ($date) {
-                $record = TeacherAttendance::where('teacher_id', $t->id)
-                    ->where('attendance_date', $date)
-                    ->first();
+            ->keyBy('teacher_id');
+
+        $teacherModels = Teacher::query()
+            ->select('id', 'teacher_id', 'first_name', 'last_name', 'gender', 'position', 'major_id', 'subject_id', 'image')
+            ->with(['major:id,name', 'subject:id,name'])
+            ->orderBy('first_name')
+            ->get();
+
+        $teachers = $teacherModels
+            ->map(function (Teacher $t) use ($attendanceRecords) {
+                $record = $attendanceRecords->get($t->id);
 
                 return [
                     'id'             => $t->id,
@@ -47,7 +56,7 @@ class TeacherAttendanceController extends Controller
                 ];
             });
 
-        $summary = $this->buildSummary($date);
+        $summary = $this->buildSummary($date, $attendanceRecords->values(), $teacherModels->count());
 
         return $this->success([
             'date'     => $date,
@@ -104,7 +113,6 @@ class TeacherAttendanceController extends Controller
         $to   = $request->query('to',   now()->toDateString());
 
         $rows = DB::table('teacher_attendances')
-            ->join('teachers', 'teacher_attendances.teacher_id', '=', 'teachers.id')
             ->whereBetween('attendance_date', [$from, $to])
             ->select(
                 'attendance_date as date',
@@ -131,11 +139,16 @@ class TeacherAttendanceController extends Controller
         $from = $request->query('from', now()->startOfMonth()->toDateString());
         $to   = $request->query('to',   now()->toDateString());
 
-        $teachers = Teacher::with(['major'])
+        $teachers = Teacher::query()
+            ->select('id', 'first_name', 'last_name', 'position', 'major_id', 'image')
+            ->with(['major:id,name'])
             ->orderBy('first_name')
             ->get();
 
-        $records = TeacherAttendance::whereBetween('attendance_date', [$from, $to])
+        $records = TeacherAttendance::query()
+            ->select('teacher_id', 'attendance_date', 'status')
+            ->whereBetween('attendance_date', [$from, $to])
+            ->orderBy('attendance_date')
             ->get()
             ->groupBy('teacher_id');
 
@@ -188,10 +201,29 @@ class TeacherAttendanceController extends Controller
         ]);
     }
 
-    private function buildSummary(string $date): array
+    private function buildSummary(string $date, ?Collection $records = null, ?int $total = null): array
     {
-        $total   = Teacher::count();
-        $records = TeacherAttendance::where('attendance_date', $date)->get();
+        $total ??= Teacher::count();
+
+        if ($records === null) {
+            $statusCounts = TeacherAttendance::query()
+                ->where('attendance_date', $date)
+                ->select('status', DB::raw('COUNT(*) as count'))
+                ->groupBy('status')
+                ->pluck('count', 'status');
+
+            $marked = (int) $statusCounts->sum();
+
+            return [
+                'total'     => $total,
+                'marked'    => $marked,
+                'unmarked'  => max(0, $total - $marked),
+                'present'   => (int) ($statusCounts->get('Present') ?? 0),
+                'absent'    => (int) ($statusCounts->get('Absent') ?? 0),
+                'late'      => (int) ($statusCounts->get('Late') ?? 0),
+                'leave'     => (int) ($statusCounts->get('Leave') ?? 0),
+            ];
+        }
 
         return [
             'total'     => $total,

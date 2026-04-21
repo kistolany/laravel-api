@@ -5,14 +5,24 @@ services:
     container_name: laravel_api
     restart: unless-stopped
     command: sh -c "mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache; chown -R www-data:www-data storage bootstrap/cache; php-fpm -F"
+    environment:
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      DB_SLOW_QUERY_LOG_ENABLED: 'true'
+      DB_SLOW_QUERY_THRESHOLD_MS: '100'
     volumes:
       - .:/var/www
       - laravel_framework_cache:/var/www/storage/framework/cache
       - laravel_framework_sessions:/var/www/storage/framework/sessions
       - laravel_framework_views:/var/www/storage/framework/views
       - laravel_bootstrap_cache:/var/www/bootstrap/cache
+      - laravel_vendor:/var/www/vendor
     depends_on:
       - db
+      - redis
 
   # Nginx Gateway Service
   nginx:
@@ -40,9 +50,20 @@ services:
     volumes:
       - db_data:/var/lib/mysql
 
+  # Redis Cache/Session/Queue Service
+  redis:
+    image: redis:7-alpine
+    container_name: laravel_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
 volumes:
   db_data:
+  redis_data:
   laravel_framework_cache:
   laravel_framework_sessions:
   laravel_framework_views:
   laravel_bootstrap_cache:
+  laravel_vendor:

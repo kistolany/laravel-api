@@ -25,6 +25,11 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     zip \
     opcache
 
+RUN apk add --no-cache --virtual .phpize-deps $PHPIZE_DEPS \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apk del .phpize-deps
+
 # Runtime tuning for faster local API responses
 COPY docker/php/performance.ini /usr/local/etc/php/conf.d/performance.ini
 
