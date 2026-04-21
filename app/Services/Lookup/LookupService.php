@@ -313,11 +313,13 @@ class LookupService extends BaseService
             return null;
         }
 
-        if (!is_numeric($value)) {
-            return null;
+        if (is_numeric($value)) {
+            return (int) $value;
         }
 
-        return (int) $value;
+        // Handle "Year 1", "Year 2" etc. from AcademicInfo.stage
+        $extracted = (int) filter_var($value, FILTER_SANITIZE_NUMBER_INT);
+        return $extracted > 0 ? $extracted : null;
     }
 }
 

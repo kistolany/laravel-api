@@ -56,33 +56,32 @@ class StudentScoreService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($filters): array {
             $filters = $this->normalizeFilters($filters);
 
-            // ── 1. Resolve subjects for this major/year/semester ───────────────
-            $subjects = $this->resolveGradeBookSubjects($filters);
-
-            if ($subjects->isEmpty()) {
-                return ['subjects' => [], 'students' => [], 'total' => 0];
-            }
-
-            $subjectIds  = $subjects->pluck('id');
-            $gbYearInt   = isset($filters['stage']) && $filters['stage']
+            $gbYearInt = isset($filters['stage']) && $filters['stage']
                 ? (is_numeric($filters['stage'])
                     ? (int) $filters['stage']
                     : (int) filter_var($filters['stage'], FILTER_SANITIZE_NUMBER_INT))
                 : null;
 
-            // ── 2. Load students matching the filters ──────────────────────────
-            $students = $this->studentQuery($filters)
+            // ── 1. Resolve subjects for this major/year/semester ───────────────
+            $subjects   = $this->resolveGradeBookSubjects($filters, $gbYearInt);
+            $subjectIds = $subjects->pluck('id');
+
+            // ── 2. Load students — use simple direct filters, NOT studentQuery()
+            //       so we don't exclude students who have no scores/classes yet
+            $students = $this->gradeBookStudentQuery($filters, $gbYearInt)
                 ->with([
                     'academicInfo.major',
                     'academicInfo.shift',
                     'classes',
                     'classes.programs',
                     'scores' => function ($q) use ($subjectIds, $filters, $gbYearInt) {
-                        $q->whereIn('subject_id', $subjectIds)
-                          ->when($filters['class_id'],     fn ($q, $v) => $q->where('class_id', $v))
-                          ->when($filters['academic_year'], fn ($q, $v) => $q->where('academic_year', $v))
-                          ->when($gbYearInt,               fn ($q) use ($gbYearInt) => $q->where('year_level', $gbYearInt))
-                          ->when($filters['semester'],     fn ($q, $v) => $q->where('semester', $v));
+                        // Only load scores for these subjects; no filter = load all
+                        if ($subjectIds->isNotEmpty()) {
+                            $q->whereIn('subject_id', $subjectIds);
+                        }
+                        if ($filters['class_id'])     $q->where('class_id', $filters['class_id']);
+                        if ($gbYearInt)               $q->where('year_level', $gbYearInt);
+                        if ($filters['semester'])     $q->where('semester', $filters['semester']);
                     },
                     'scores.subject',
                 ])
@@ -149,36 +148,81 @@ class StudentScoreService extends BaseService
         });
     }
 
-    private function resolveGradeBookSubjects(array $filters): Collection
+    private function gradeBookStudentQuery(array $filters, ?int $yearInt): Builder
     {
-        // Subjects always come from major_subjects (major + year + semester)
-        // When class is selected, resolve its programs to find the matching major/year/semester
+        $hasClassId = !empty($filters['class_id']);
+        $hasMajorId = !empty($filters['major_id']);
+
+        return Students::query()
+            ->whereIn('student_type', ['PAY', 'PASS'])
+            // class enrollment filter
+            ->when($hasClassId, fn (Builder $q) =>
+                $q->whereHas('classes', fn (Builder $cq) => $cq->where('classes.id', $filters['class_id']))
+            )
+            // major filter — always match student's OWN academicInfo.major_id
+            ->when($hasMajorId, fn (Builder $q) =>
+                $q->whereHas('academicInfo', fn (Builder $aq) => $aq->where('major_id', $filters['major_id']))
+            )
+            // year filter — match academicInfo.stage OR enrolled class's programs
+            ->when($yearInt, function (Builder $q) use ($filters, $yearInt, $hasClassId) {
+                if ($hasClassId) {
+                    $classId = $filters['class_id'];
+                    $q->whereHas('classes', fn (Builder $cq) =>
+                        $cq->where('classes.id', $classId)
+                           ->whereHas('programs', fn (Builder $pq) => $pq->where('year_level', $yearInt))
+                    );
+                } else {
+                    $q->where(function (Builder $sq) use ($filters, $yearInt) {
+                        $sq->whereHas('academicInfo', fn (Builder $aq) => $aq->where('stage', $filters['stage']))
+                           ->orWhereHas('classes.programs', fn (Builder $pq) => $pq->where('year_level', $yearInt));
+                    });
+                }
+            })
+            // semester filter — match enrolled class's programs
+            ->when($filters['semester'], function (Builder $q) use ($filters, $hasClassId) {
+                if ($hasClassId) {
+                    $classId = $filters['class_id'];
+                    $q->whereHas('classes', fn (Builder $cq) =>
+                        $cq->where('classes.id', $classId)
+                           ->whereHas('programs', fn (Builder $pq) => $pq->where('semester', $filters['semester']))
+                    );
+                } else {
+                    $q->whereHas('classes.programs', fn (Builder $pq) => $pq->where('semester', $filters['semester']));
+                }
+            })
+            ->when($filters['search'], function (Builder $q, string $search) {
+                $q->where(function (Builder $sq) use ($search) {
+                    $sq->where('full_name_kh', 'like', "%{$search}%")
+                       ->orWhere('full_name_en', 'like', "%{$search}%")
+                       ->orWhere('id_card_number', 'like', "%{$search}%");
+                });
+            });
+    }
+
+    private function resolveGradeBookSubjects(array $filters, ?int $yearInt = null): Collection
+    {
         $majorId  = $filters['major_id'];
-        $yearInt  = isset($filters['stage']) && $filters['stage']
-            ? (is_numeric($filters['stage'])
-                ? (int) $filters['stage']
-                : (int) filter_var($filters['stage'], FILTER_SANITIZE_NUMBER_INT))
-            : null;
         $semester = $filters['semester'];
 
-        // If class_id set but no explicit major/year/semester, derive from class programs
+        // If class_id set but filters are incomplete, derive from class programs
         if ($filters['class_id'] && (!$majorId || !$yearInt || !$semester)) {
             $class = Classes::with('programs')->find($filters['class_id']);
             if ($class) {
-                $program = $this->resolveProgram($class, $filters);
+                $program  = $this->resolveProgram($class, $filters);
                 $majorId  = $majorId  ?? $program?->major_id;
                 $yearInt  = $yearInt  ?? ($program ? (int) $program->year_level : null);
                 $semester = $semester ?? ($program ? (string) $program->semester : null);
             }
         }
 
+        // Need at least a major to look up subjects
         if (!$majorId) return collect();
 
         return Subject::query()
             ->whereIn('id', MajorSubject::query()
                 ->where('major_id', $majorId)
-                ->when($yearInt,   fn ($q) => $q->where('year_level', $yearInt))
-                ->when($semester,  fn ($q) => $q->where('semester', $semester))
+                ->when($yearInt,  fn ($q) => $q->where('year_level', $yearInt))
+                ->when($semester, fn ($q) => $q->where('semester', $semester))
                 ->select('subject_id')
             )
             ->orderBy('subject_Code')
