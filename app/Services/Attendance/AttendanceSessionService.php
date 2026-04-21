@@ -13,11 +13,17 @@ use App\Models\AttendanceSession;
 use App\Models\Classes;
 use App\Models\MajorSubject;
 use App\Models\Students;
+use App\Models\Subject;
 use App\Models\Teacher;
 use App\Services\Concerns\ServiceTraceable;
+use Illuminate\Support\Facades\DB;
+
 class AttendanceSessionService
 {
     use ServiceTraceable;
+
+    private const DEFAULT_MATRIX_SESSION_COUNT = 30;
+    private const MAX_MATRIX_SESSION_COUNT = 60;
 
     public function buildListResponse(): array
     {
@@ -263,6 +269,153 @@ class AttendanceSessionService
             );
             
             
+        });
+    }
+
+    public function buildMatrixResponse(array $filters): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($filters): array {
+            $classId = $this->toNullableInt($filters['class_id'] ?? null);
+            $subjectId = $this->toNullableInt($filters['subject_id'] ?? null);
+
+            if (!$classId || !$subjectId) {
+                return $this->errorResponse(422, 'Validation failed.', [
+                    'errors' => [
+                        'class_id' => ['Class is required.'],
+                        'subject_id' => ['Subject is required.'],
+                    ],
+                ]);
+            }
+
+            $class = $this->findClassForMatrix($classId);
+            if (!$class) {
+                return $this->errorResponse(404, 'Class not found.');
+            }
+
+            $subject = Subject::find($subjectId);
+            if (!$subject) {
+                return $this->errorResponse(404, 'Subject not found.');
+            }
+
+            return $this->successResponse(
+                200,
+                'Attendance matrix retrieved successfully.',
+                $this->buildMatrixPayload(
+                    $class,
+                    $subject,
+                    $this->formatDate($filters['session_date'] ?? now()->toDateString()),
+                    $this->matrixSessionCount($filters['session_count'] ?? null),
+                    $filters
+                )
+            );
+        });
+    }
+
+    public function saveMatrixResponse(array $data): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($data): array {
+            $class = $this->findClassForMatrix((int) $data['class_id']);
+            if (!$class) {
+                return $this->errorResponse(404, 'Class not found.');
+            }
+
+            $subject = Subject::find((int) $data['subject_id']);
+            if (!$subject) {
+                return $this->errorResponse(404, 'Subject not found.');
+            }
+
+            $sessionDate = $this->formatDate($data['session_date']);
+            $sessionCount = $this->matrixSessionCount($data['session_count'] ?? null);
+            $validStudentIds = $class->students->pluck('id')->map(fn ($id) => (int) $id)->all();
+            $validSet = array_fill_keys($validStudentIds, true);
+            $resolvedStudentIds = $this->resolveStudentIdsFromRecords($data['records']);
+            $validRecords = [];
+            $errors = [];
+
+            foreach ($data['records'] as $index => $record) {
+                $resolvedId = $resolvedStudentIds[$index] ?? null;
+
+                if (!$resolvedId) {
+                    $errors["records.{$index}.student_id"][] = 'Invalid student_id format.';
+                    continue;
+                }
+
+                if (!isset($validSet[$resolvedId])) {
+                    $errors["records.{$index}.student_id"][] = 'Student does not belong to this class.';
+                    continue;
+                }
+
+                $validRecords[] = [
+                    'student_id' => $resolvedId,
+                    'attendance' => array_slice($record['attendance'] ?? [], 0, $sessionCount),
+                ];
+            }
+
+            if (!empty($errors)) {
+                return $this->errorResponse(422, 'Validation failed.', ['errors' => $errors]);
+            }
+
+            $savedRecords = 0;
+
+            DB::transaction(function () use ($class, $subject, $sessionDate, $sessionCount, $validRecords, &$savedRecords): void {
+                $sessions = [];
+
+                for ($sessionNumber = 1; $sessionNumber <= $sessionCount; $sessionNumber++) {
+                    $sessions[$sessionNumber] = AttendanceSession::firstOrCreate(
+                        [
+                            'class_id' => $class->id,
+                            'subject_id' => $subject->id,
+                            'session_date' => $sessionDate,
+                            'session_number' => $sessionNumber,
+                        ],
+                        [
+                            'teacher_id' => null,
+                            'major_id' => $class->major_id,
+                            'shift_id' => $class->shift_id,
+                            'academic_year' => $class->academic_year,
+                            'year_level' => $class->year_level,
+                            'semester' => $class->semester,
+                        ]
+                    );
+                }
+
+                $now = now();
+                $rows = [];
+
+                foreach ($validRecords as $record) {
+                    for ($slotIndex = 0; $slotIndex < $sessionCount; $slotIndex++) {
+                        $session = $sessions[$slotIndex + 1];
+                        $rows[] = [
+                            'attendance_session_id' => $session->id,
+                            'student_id' => $record['student_id'],
+                            'status' => $this->matrixStatusToBackend($record['attendance'][$slotIndex] ?? 'Att'),
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+                    }
+                }
+
+                if (!empty($rows)) {
+                    AttendanceRecord::upsert(
+                        $rows,
+                        ['attendance_session_id', 'student_id'],
+                        ['status', 'updated_at']
+                    );
+                }
+
+                $savedRecords = count($rows);
+            });
+
+            $class->load(['students.academicInfo.major', 'major', 'shift', 'programs.major', 'programs.shift']);
+
+            return $this->successResponse(
+                200,
+                'Attendance matrix saved successfully.',
+                array_merge(
+                    $this->buildMatrixPayload($class, $subject, $sessionDate, $sessionCount, $data),
+                    ['saved_records' => $savedRecords]
+                )
+            );
         });
     }
 
@@ -611,6 +764,213 @@ class AttendanceSessionService
         ]);
     }
 
+    private function buildMatrixPayload(Classes $class, Subject $subject, string $sessionDate, int $sessionCount, array $filters = []): array
+    {
+        $sessions = AttendanceSession::query()
+            ->with('records')
+            ->where('class_id', $class->id)
+            ->where('subject_id', $subject->id)
+            ->where('session_date', $sessionDate)
+            ->whereBetween('session_number', [1, $sessionCount])
+            ->get()
+            ->keyBy(fn (AttendanceSession $session) => (int) $session->session_number);
+
+        $recordMap = [];
+        foreach ($sessions as $sessionNumber => $session) {
+            foreach ($session->records as $record) {
+                $recordMap[(int) $sessionNumber][(int) $record->student_id] = $this->statusToUi($record->status);
+            }
+        }
+
+        $summary = [
+            'total_students' => 0,
+            'total_sessions' => $sessionCount,
+            'present' => 0,
+            'absent' => 0,
+            'late' => 0,
+            'excused' => 0,
+        ];
+
+        $students = $class->students
+            ->filter(fn (Students $student) => $this->studentMatchesMatrixFilters($student, $filters))
+            ->sortBy(fn (Students $student) => $student->full_name_en ?: $student->full_name_kh ?: $student->id)
+            ->values()
+            ->map(function (Students $student, int $index) use ($sessionCount, $recordMap, &$summary): array {
+                $attendance = [];
+
+                for ($sessionNumber = 1; $sessionNumber <= $sessionCount; $sessionNumber++) {
+                    $status = $recordMap[$sessionNumber][$student->id] ?? 'Att';
+                    $attendance[] = $status;
+
+                    match ($status) {
+                        'A' => $summary['absent']++,
+                        'L' => $summary['late']++,
+                        'P' => $summary['excused']++,
+                        default => $summary['present']++,
+                    };
+                }
+
+                $summary['total_students']++;
+
+                return [
+                    'key' => (string) $student->id,
+                    'no' => $index + 1,
+                    'student_id' => $student->id,
+                    'student_code' => $student->id_card_number ?: $student->barcode,
+                    'full_name_kh' => $student->full_name_kh,
+                    'full_name_en' => $student->full_name_en,
+                    'gender' => $student->gender,
+                    'dob' => $this->formatDate($student->dob),
+                    'batch_year' => $student->academicInfo?->batch_year,
+                    'stage' => $student->academicInfo?->stage,
+                    'major_name' => $student->academicInfo?->major?->name,
+                    'attendance' => $attendance,
+                ];
+            })
+            ->all();
+
+        $program = $class->relationLoaded('programs') ? $class->programs->first() : null;
+        $major = $class->major ?? $program?->major;
+        $shift = $class->shift ?? $program?->shift;
+
+        return [
+            'session_date' => $sessionDate,
+            'session_count' => $sessionCount,
+            'class' => [
+                'id' => $class->id,
+                'name' => $class->name ?? $class->code,
+                'code' => $class->code,
+                'academic_year' => $class->academic_year,
+                'year_level' => $class->year_level,
+                'semester' => $class->semester,
+            ],
+            'major' => [
+                'id' => $major?->id,
+                'name' => $major?->name,
+            ],
+            'subject' => [
+                'id' => $subject->id,
+                'code' => $subject->subject_Code,
+                'name' => $subject->name,
+                'label' => trim(($subject->subject_Code ? $subject->subject_Code . ' - ' : '') . ($subject->name ?? '')),
+            ],
+            'shift' => [
+                'id' => $shift?->id,
+                'name' => $shift?->name,
+                'time_range' => $shift?->time_range,
+            ],
+            'students' => $students,
+            'summary' => $summary,
+        ];
+    }
+
+    private function findClassForMatrix(int $classId): ?Classes
+    {
+        return Classes::query()
+            ->with(['students.academicInfo.major.faculty', 'major', 'shift', 'programs.major', 'programs.shift'])
+            ->find($classId);
+    }
+
+    private function studentMatchesMatrixFilters(Students $student, array $filters): bool
+    {
+        $academic = $student->academicInfo;
+
+        $batchYear = $filters['batch_year'] ?? $filters['batch'] ?? null;
+        if (!$this->sameScalar($academic?->batch_year, $batchYear)) {
+            return false;
+        }
+
+        $studyDay = $filters['study_day'] ?? $filters['study_days'] ?? null;
+        if (!$this->sameScalar($academic?->study_days, $studyDay)) {
+            return false;
+        }
+
+        $majorId = $this->toNullableInt($filters['major_id'] ?? null);
+        if ($majorId && (int) ($academic?->major_id ?? 0) !== $majorId) {
+            return false;
+        }
+
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        if ($shiftId && (int) ($academic?->shift_id ?? 0) !== $shiftId) {
+            return false;
+        }
+
+        $facultyId = $this->toNullableInt($filters['faculty_id'] ?? null);
+        if ($facultyId && (int) ($academic?->major?->faculty_id ?? 0) !== $facultyId) {
+            return false;
+        }
+
+        $yearLevel = $filters['year_level'] ?? $filters['stage'] ?? null;
+        if (!$this->sameYearLevel($academic?->stage, $yearLevel)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function matrixSessionCount(mixed $value): int
+    {
+        $count = is_numeric($value) ? (int) $value : self::DEFAULT_MATRIX_SESSION_COUNT;
+
+        return min(max($count, 1), self::MAX_MATRIX_SESSION_COUNT);
+    }
+
+    private function statusToUi(?string $status): string
+    {
+        return match ($this->normalizeStatus($status)) {
+            'Absent' => 'A',
+            'Late' => 'L',
+            'Excused' => 'P',
+            default => 'Att',
+        };
+    }
+
+    private function sameScalar(mixed $actual, mixed $expected): bool
+    {
+        if ($expected === null || $expected === '') {
+            return true;
+        }
+
+        if ($actual === null || $actual === '') {
+            return false;
+        }
+
+        return trim((string) $actual) === trim((string) $expected);
+    }
+
+    private function sameYearLevel(mixed $actual, mixed $expected): bool
+    {
+        if ($expected === null || $expected === '') {
+            return true;
+        }
+
+        if ($actual === null || $actual === '') {
+            return false;
+        }
+
+        $actualNumber = $this->toNullableYearLevel($actual);
+        $expectedNumber = $this->toNullableYearLevel($expected);
+
+        if ($actualNumber && $expectedNumber) {
+            return $actualNumber === $expectedNumber;
+        }
+
+        return strtolower(trim((string) $actual)) === strtolower(trim((string) $expected));
+    }
+
+    private function matrixStatusToBackend(?string $status): string
+    {
+        $value = strtolower(trim((string) $status));
+
+        return match ($value) {
+            'att', 'present' => 'Present',
+            'a', 'absent' => 'Absent',
+            'l', 'late' => 'Late',
+            'p', 'excused', 'excuse', 'permission', 'permit' => 'Excused',
+            default => 'Present',
+        };
+    }
+
     private function successResponse(int $status, string $message, array $data): array
     {
         return [
@@ -764,6 +1124,30 @@ class AttendanceSessionService
     private function formatStudentCode(int $studentId): string
     {
         return 'ST' . str_pad((string) $studentId, 3, '0', STR_PAD_LEFT);
+    }
+
+    private function toNullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return is_numeric($value) ? (int) $value : null;
+    }
+
+    private function toNullableYearLevel(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        $extracted = (int) filter_var((string) $value, FILTER_SANITIZE_NUMBER_INT);
+
+        return $extracted > 0 ? $extracted : null;
     }
 }
 

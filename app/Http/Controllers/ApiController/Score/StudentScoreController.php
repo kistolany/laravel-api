@@ -32,6 +32,11 @@ class StudentScoreController extends Controller
         return $this->success($this->service->finalResults($request->query()), 'Final score results retrieved successfully.');
     }
 
+    public function reexamResults(Request $request): JsonResponse
+    {
+        return $this->success($this->service->reexamResults($request->query()), 'Re-exam results retrieved successfully.');
+    }
+
     public function bulkUpsert(StudentScoreBulkUpsertRequest $request): JsonResponse
     {
         $validated = $request->validated();

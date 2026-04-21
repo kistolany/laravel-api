@@ -155,6 +155,8 @@ Route::prefix('v1')->group(function () {
 
         // Attendance routes
         Route::get('attendance-sessions', [AttendanceSessionController::class, 'index'])->middleware('permission:attendance.view');
+        Route::get('attendance-sessions/matrix', [AttendanceSessionController::class, 'matrix'])->middleware('permission:attendance.view');
+        Route::post('attendance-sessions/matrix', [AttendanceSessionController::class, 'saveMatrix'])->middleware('permission:attendance.create|attendance.record');
         Route::get('attendance-sessions/major/{majorId}', [AttendanceSessionController::class, 'byMajor'])->middleware('permission:attendance.view');
         Route::get('attendance-sessions/major/{majorId}/subject/{subjectId}/report', [AttendanceSessionController::class, 'reportByMajorAndSubject'])->middleware('permission:attendance.report.by_major_subject');
         Route::get('attendance-sessions/{id}', [AttendanceSessionController::class, 'show'])->middleware('permission:attendance.view');
@@ -164,6 +166,7 @@ Route::prefix('v1')->group(function () {
         // Student score routes
         Route::get('student-scores/grade-book', [StudentScoreController::class, 'gradeBook'])->middleware('permission:student.view');
         Route::get('student-scores/final-results', [StudentScoreController::class, 'finalResults'])->middleware('permission:student.view');
+        Route::get('student-scores/reexam-results', [StudentScoreController::class, 'reexamResults'])->middleware('permission:student.view');
         Route::get('student-scores', [StudentScoreController::class, 'index'])->middleware('permission:student.view');
         Route::post('student-scores/bulk', [StudentScoreController::class, 'bulkUpsert'])->middleware('permission:student.update');
 

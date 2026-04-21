@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\ApiController\Attendance;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Attendance\AttendanceMatrixRequest;
 use App\Http\Requests\Attendance\AttendanceRecordBulkRequest;
 use App\Http\Requests\Attendance\AttendanceSessionRequest;
 use App\Services\Attendance\AttendanceSessionService;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AttendanceSessionController extends Controller
 {
@@ -43,6 +45,20 @@ class AttendanceSessionController extends Controller
         return response()->json($response['payload'], $response['status']);
     }
 
+    public function matrix(Request $request): JsonResponse
+    {
+        $response = $this->service->buildMatrixResponse($request->query());
+
+        return response()->json($response['payload'], $response['status']);
+    }
+
+    public function saveMatrix(AttendanceMatrixRequest $request): JsonResponse
+    {
+        $response = $this->service->saveMatrixResponse($request->validated());
+
+        return response()->json($response['payload'], $response['status']);
+    }
+
     public function store(AttendanceSessionRequest $request): JsonResponse
     {
         $response = $this->service->createSessionResponse($request->validated());
@@ -58,4 +74,3 @@ class AttendanceSessionController extends Controller
         return response()->json($response['payload'], $response['status']);
     }
 }
-

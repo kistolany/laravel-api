@@ -20,6 +20,10 @@ use Illuminate\Support\Facades\Log;
 
 class StudentScoreService extends BaseService
 {
+    private const ATTENDANCE_MAX_SCORE = 10.0;
+    private const SUBJECT_MAX_SCORE = 90.0;
+    private const PASS_PERCENTAGE = 50.0;
+
     public function index(array $filters = []): array
     {
         return $this->trace(__FUNCTION__, function () use ($filters): array {
@@ -262,6 +266,114 @@ class StudentScoreService extends BaseService
                 'total' => $students->count(),
             ];
         });
+    }
+
+    public function reexamResults(array $filters = []): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($filters): array {
+            $results = $this->finalResults($filters);
+            $subjectCount = count($results['subjects'] ?? []);
+
+            $items = collect($results['items'] ?? [])
+                ->map(fn (array $row): array => $this->withReexamMeta($row, $subjectCount))
+                ->filter(fn (array $row): bool => (bool) ($row['needs_reexam'] ?? false))
+                ->sortBy('full_name_en')
+                ->values()
+                ->all();
+
+            $results['items'] = $items;
+            $results['total'] = count($items);
+
+            return $results;
+        });
+    }
+
+    private function withReexamMeta(array $row, int $fallbackSubjectCount): array
+    {
+        $failedSubjects = $this->failedSubjects($row);
+        $maxPossibleTotal = $this->maxPossibleFinalTotal($row, $fallbackSubjectCount);
+        $finalTotal = (float) ($row['final_total'] ?? 0);
+        $finalPercentage = $maxPossibleTotal > 0
+            ? round(($finalTotal / $maxPossibleTotal) * 100, 2)
+            : 0.0;
+
+        $isDisqualified = (bool) ($row['is_disqualified'] ?? false);
+        $hasFailedSubjects = count($failedSubjects) > 0;
+        $hasLowFinalPercentage = $maxPossibleTotal > 0 && $finalPercentage < self::PASS_PERCENTAGE;
+
+        $row['max_possible_total'] = $maxPossibleTotal;
+        $row['final_percentage'] = $finalPercentage;
+        $row['pass_percentage'] = self::PASS_PERCENTAGE;
+        $row['subject_pass_score'] = $this->subjectPassScore();
+        $row['failed_subjects'] = $failedSubjects;
+        $row['needs_reexam'] = $isDisqualified || $hasLowFinalPercentage || $hasFailedSubjects;
+        $row['reexam_reason'] = $this->reexamReason($isDisqualified, $hasLowFinalPercentage, $hasFailedSubjects);
+
+        return $row;
+    }
+
+    private function failedSubjects(array $row): array
+    {
+        return collect($row['subjects'] ?? [])
+            ->values()
+            ->map(fn (array $subject, int $index): array => [
+                'slot_index' => $index,
+                'subject_id' => $subject['subject_id'] ?? null,
+                'subject_code' => $subject['subject_code'] ?? null,
+                'subject_name' => $subject['subject_name'] ?? null,
+                'label' => $this->subjectLabel($subject),
+                'total' => round((float) ($subject['total'] ?? 0), 2),
+                'pass_score' => $this->subjectPassScore(),
+                'percentage' => round(((float) ($subject['total'] ?? 0) / self::SUBJECT_MAX_SCORE) * 100, 2),
+            ])
+            ->filter(fn (array $subject): bool => $subject['total'] < $subject['pass_score'])
+            ->values()
+            ->all();
+    }
+
+    private function maxPossibleFinalTotal(array $row, int $fallbackSubjectCount): float
+    {
+        $subjectCount = max(count($row['subjects'] ?? []), $fallbackSubjectCount);
+
+        if ($subjectCount <= 0) {
+            return 0.0;
+        }
+
+        return round(self::ATTENDANCE_MAX_SCORE + ($subjectCount * self::SUBJECT_MAX_SCORE), 2);
+    }
+
+    private function subjectPassScore(): float
+    {
+        return round(self::SUBJECT_MAX_SCORE * (self::PASS_PERCENTAGE / 100), 2);
+    }
+
+    private function reexamReason(bool $isDisqualified, bool $hasLowFinalPercentage, bool $hasFailedSubjects): string
+    {
+        if ($isDisqualified) {
+            return 'disqualified';
+        }
+
+        if ($hasLowFinalPercentage && $hasFailedSubjects) {
+            return 'low_final_and_failed_subjects';
+        }
+
+        if ($hasLowFinalPercentage) {
+            return 'low_final_percentage';
+        }
+
+        if ($hasFailedSubjects) {
+            return 'failed_subjects';
+        }
+
+        return 'none';
+    }
+
+    private function subjectLabel(array $subject): string
+    {
+        $code = trim((string) ($subject['subject_code'] ?? ''));
+        $name = trim((string) ($subject['subject_name'] ?? ''));
+
+        return trim(($code ? $code . ' - ' : '') . $name) ?: 'Subject';
     }
 
     public function bulkUpsert(array $records): array
