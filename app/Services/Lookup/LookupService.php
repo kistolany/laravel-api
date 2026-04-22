@@ -377,10 +377,9 @@ class LookupService extends BaseService
 
             return $this->rememberLookup($fn, $filters, function () use ($filters): array {
                 $query = Classes::query()
-                    ->select('classes.id', 'classes.name')
-                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('classes.academic_year', $value));
+                    ->select('classes.id', 'classes.name');
 
-                if ($this->hasAttendanceClassContextFilters($filters)) {
+                if ($this->hasAttendanceClassContextFilters($filters) || $filters['academic_year'] || $filters['study_day']) {
                     $query->where(function ($contextQuery) use ($filters) {
                         $this->applyAttendanceClassContextFilters($contextQuery, $filters);
                     });
@@ -423,15 +422,15 @@ class LookupService extends BaseService
                     || $filters['year_level']
                     || $filters['semester'];
 
-                if ($filters['class_id'] && empty($contexts)) {
-                    return [];
-                }
-
                 if ($filters['class_id']) {
                     $scheduled = $this->getScheduledAttendanceSubjects($filters);
 
                     if (!empty($scheduled)) {
                         return $scheduled;
+                    }
+
+                    if (empty($contexts)) {
+                        return [];
                     }
                 }
 
@@ -558,21 +557,49 @@ class LookupService extends BaseService
 
     private function applyAttendanceClassContextFilters($query, array $filters): void
     {
-        $query
-            ->where(function ($direct) use ($filters) {
+        $hasDirectFilters = (bool) (
+            $filters['faculty_id']
+            || $filters['major_id']
+            || $filters['shift_id']
+            || $filters['year_level']
+            || $filters['semester']
+            || $filters['academic_year']
+        );
+        $hasProgramFilters = (bool) (
+            $filters['faculty_id']
+            || $filters['major_id']
+            || $filters['shift_id']
+            || $filters['year_level']
+            || $filters['semester']
+        );
+        $scheduleDay = $this->toScheduleDay($filters['study_day']);
+        $hasScheduleFilters = (bool) (
+            $filters['shift_id']
+            || $filters['year_level']
+            || $filters['semester']
+            || $filters['academic_year']
+            || $scheduleDay
+        );
+
+        if ($hasDirectFilters) {
+            $query->where(function ($direct) use ($filters) {
                 $direct
                     ->when($filters['major_id'], fn ($q, $value) => $q->where('classes.major_id', $value))
                     ->when($filters['shift_id'], fn ($q, $value) => $q->where('classes.shift_id', $value))
                     ->when($filters['year_level'], fn ($q, $value) => $q->where('classes.year_level', $value))
-                    ->when($filters['semester'], fn ($q, $value) => $q->where('classes.semester', $value));
+                    ->when($filters['semester'], fn ($q, $value) => $q->where('classes.semester', $value))
+                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('classes.academic_year', $value));
 
                 if ($filters['faculty_id'] && !$filters['major_id']) {
                     $direct->whereIn('classes.major_id', Major::query()
                         ->select('id')
                         ->where('faculty_id', $filters['faculty_id']));
                 }
-            })
-            ->orWhereExists(function ($program) use ($filters) {
+            });
+        }
+
+        if ($hasProgramFilters) {
+            $programClause = function ($program) use ($filters) {
                 $program
                     ->selectRaw('1')
                     ->from('class_programs')
@@ -586,7 +613,34 @@ class LookupService extends BaseService
                 if ($filters['faculty_id'] && !$filters['major_id']) {
                     $program->where('program_majors.faculty_id', $filters['faculty_id']);
                 }
-            });
+            };
+
+            if ($hasDirectFilters) {
+                $query->orWhereExists($programClause);
+            } else {
+                $query->whereExists($programClause);
+            }
+        }
+
+        if ($hasScheduleFilters) {
+            $scheduleClause = function ($schedule) use ($filters, $scheduleDay) {
+                $schedule
+                    ->selectRaw('1')
+                    ->from('class_schedules')
+                    ->whereColumn('class_schedules.class_id', 'classes.id')
+                    ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_schedules.shift_id', $value))
+                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('class_schedules.academic_year', $value))
+                    ->when($filters['year_level'], fn ($q, $value) => $q->where('class_schedules.year_level', $value))
+                    ->when($filters['semester'], fn ($q, $value) => $q->where('class_schedules.semester', $value))
+                    ->when($scheduleDay, fn ($q, $value) => $q->where('class_schedules.day_of_week', $value));
+            };
+
+            if ($hasDirectFilters || $hasProgramFilters) {
+                $query->orWhereExists($scheduleClause);
+            } else {
+                $query->whereExists($scheduleClause);
+            }
+        }
     }
 
     private function applyAttendanceAcademicFilters($query, array $filters, string $academicTable, string $majorTable): void
@@ -633,20 +687,26 @@ class LookupService extends BaseService
                 'semester' => $program->semester,
             ])
             ->filter(fn (array $context) => $context['major_id'])
-            ->values()
-            ->all();
+            ->values();
 
-        if (empty($contexts) && $class->major_id) {
-            $contexts[] = [
+        if ($class->major_id) {
+            $contexts->push([
                 'major_id' => $class->major_id,
                 'year_level' => $class->year_level,
                 'semester' => $class->semester,
-            ];
+            ]);
         }
 
         return array_values(array_filter(array_map(
             fn (array $context) => $this->mergeRequestedContext($context, $filters),
             $contexts
+                ->unique(fn (array $context) => implode(':', [
+                    $context['major_id'] ?? '',
+                    $context['year_level'] ?? '',
+                    $context['semester'] ?? '',
+                ]))
+                ->values()
+                ->all()
         )));
     }
 

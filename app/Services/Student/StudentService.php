@@ -171,6 +171,16 @@ class StudentService extends BaseService
             $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $batchYear));
         });
 
+        // Filter by academic year (class context)
+        $query->when(request('academic_year'), function ($q, $academicYear) {
+            $q->whereHas('classes', fn($sub) => $sub->where('classes.academic_year', $academicYear));
+        });
+
+        // Filter by semester (class context)
+        $query->when(request('semester'), function ($q, $semester) {
+            $q->whereHas('classes', fn($sub) => $sub->where('classes.semester', $semester));
+        });
+
         // Filter by study_days (study year / schedule)
         $query->when(request('study_days'), function ($q, $studyDays) {
             $q->whereHas('academicInfo', fn($sub) => $sub->where('study_days', $studyDays));
@@ -515,10 +525,11 @@ class StudentService extends BaseService
             $uploadOptions = $this->buildCloudinaryUploadOptions('students');
 
             try {
-                $uploadedFileUrl = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+                $result = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::uploadApi()->upload(
                     $file->getRealPath(),
                     $uploadOptions
-                )->getSecurePath();
+                );
+                $uploadedFileUrl = $result['secure_url'] ?? null;
             } catch (\Throwable $e) {
                 Log::error(
                     'Student image upload failed on Cloudinary.',
@@ -553,7 +564,14 @@ class StudentService extends BaseService
 
     private function buildCloudinaryUploadOptions(string $folder): array
     {
-        $options = ['folder' => $folder];
+        $options = [
+            'folder' => $folder,
+            'overwrite' => true,
+            'use_filename' => false,
+            'unique_filename' => false,
+            'use_filename_as_display_name' => true,
+            'resource_type' => 'auto',
+        ];
         $preset = trim((string) config('cloudinary.upload_preset', ''));
 
         if ($preset !== '') {

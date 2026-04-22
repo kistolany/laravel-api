@@ -97,6 +97,48 @@ class TeacherAuthService
         });
     }
 
+    public function update(int $id, array $data): Teacher
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $data): Teacher {
+            $teacher = Teacher::findOrFail($id);
+            $oldUsername = $teacher->username;
+
+            // Handle image upload if provided as file
+            if (isset($data['image']) && $data['image'] instanceof UploadedFile) {
+                $data['image'] = $this->uploadImage($data['image']);
+            }
+
+            // Hash password if provided
+            if (!empty($data['password'])) {
+                $data['password'] = Hash::make($data['password']);
+            } else {
+                unset($data['password']);
+            }
+
+            // Sync with User table if username or name changed
+            $user = User::where('username', $oldUsername)->first();
+            
+            $teacher->update($data);
+
+            if ($user) {
+                $userUpdates = [];
+                if (isset($data['username'])) $userUpdates['username'] = $data['username'];
+                if (!empty($data['password'])) $userUpdates['password_hash'] = $data['password'];
+                if (isset($data['first_name']) || isset($data['last_name'])) {
+                    $userUpdates['full_name'] = ($data['first_name'] ?? $teacher->first_name) . ' ' . ($data['last_name'] ?? $teacher->last_name);
+                }
+                if (isset($data['phone_number'])) $userUpdates['phone'] = $data['phone_number'];
+                if (isset($data['image'])) $userUpdates['image'] = $data['image'];
+
+                if (!empty($userUpdates)) {
+                    $user->update($userUpdates);
+                }
+            }
+
+            return $teacher->fresh(['major', 'subject']);
+        });
+    }
+
     public function verifyOtp(string $email, string $otpCode): Teacher
     {
         return $this->trace(__FUNCTION__, function () use ($email, $otpCode): Teacher {
@@ -359,10 +401,11 @@ class TeacherAuthService
             $uploadOptions = $this->buildCloudinaryUploadOptions('teachers');
 
             try {
-                $url = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+                $result = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::uploadApi()->upload(
                     $file->getRealPath(),
                     $uploadOptions
-                )->getSecurePath();
+                );
+                $url = $result['secure_url'] ?? null;
             } catch (\Throwable $e) {
                 Log::error(
                     'Teacher image upload failed on Cloudinary.',
@@ -413,7 +456,15 @@ class TeacherAuthService
 
     private function buildCloudinaryUploadOptions(string $folder): array
     {
-        $options = ['folder' => $folder];
+        $options = [
+            'folder' => $folder,
+            'overwrite' => true,
+            'use_filename' => false,
+            'unique_filename' => false,
+            'use_filename_as_display_name' => true,
+            'resource_type' => 'auto',
+        ];
+        
         $preset = trim((string) config('cloudinary.upload_preset', ''));
 
         if ($preset !== '') {

@@ -24,6 +24,7 @@ class ClassScheduleResource extends JsonResource
             'year_level'    => $this->year_level,
             'semester'      => $this->semester,
             'room'          => $this->room,
+            'major_name'    => $this->classroom?->major?->name,
         ];
     }
 }

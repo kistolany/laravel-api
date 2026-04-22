@@ -449,10 +449,11 @@ class AuthService
         $uploadOptions = $this->buildCloudinaryUploadOptions('users');
 
         try {
-            $url = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::upload(
+            $result = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::uploadApi()->upload(
                 $file->getRealPath(),
                 $uploadOptions
-            )->getSecurePath();
+            );
+            $url = $result['secure_url'] ?? null;
         } catch (\Throwable $e) {
             Log::error(
                 'User image upload failed on Cloudinary.',
@@ -482,7 +483,15 @@ class AuthService
 
     private function buildCloudinaryUploadOptions(string $folder): array
     {
-        $options = ['folder' => $folder];
+        $options = [
+            'folder' => $folder,
+            'overwrite' => true,
+            'use_filename' => false,
+            'unique_filename' => false,
+            'use_filename_as_display_name' => true,
+            'resource_type' => 'auto',
+        ];
+        
         $preset = trim((string) config('cloudinary.upload_preset', ''));
 
         if ($preset !== '') {

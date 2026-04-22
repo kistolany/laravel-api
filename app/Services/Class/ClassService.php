@@ -19,7 +19,7 @@ class ClassService extends BaseService
     public function index(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = Classes::query()->with(['programs.major', 'programs.shift'])->withCount('classStudents')->latest();
+            $query = Classes::query()->with(['programs.major', 'programs.shift', 'schedules.shift'])->withCount('classStudents')->latest();
 
             return $this->paginateResponse($query, ClassResource::class);
         });
@@ -30,7 +30,7 @@ class ClassService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($id, $withStudents): Classes {
             $query = Classes::query();
 
-            $query->with(['major', 'shift', 'programs.major', 'programs.shift']);
+            $query->with(['major', 'shift', 'programs.major', 'programs.shift', 'schedules.shift']);
             if ($withStudents) {
                 $query->with(['students.academicInfo.major']);
             }

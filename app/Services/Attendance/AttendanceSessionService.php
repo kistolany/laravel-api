@@ -11,6 +11,7 @@ use App\Http\Resources\Attendance\AttendanceSessionDetailResource;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classes;
+use App\Models\ClassSchedule;
 use App\Models\Major;
 use App\Models\MajorSubject;
 use App\Models\Shift;
@@ -397,6 +398,16 @@ class AttendanceSessionService
                             'semester' => $context['semester'],
                         ]
                     );
+
+                    if (!$session->wasRecentlyCreated) {
+                        $session->forceFill([
+                            'major_id' => $context['major_id'],
+                            'shift_id' => $context['shift_id'],
+                            'academic_year' => $context['academic_year'],
+                            'year_level' => $context['year_level'],
+                            'semester' => $context['semester'],
+                        ])->save();
+                    }
 
                     // Auto-inject Leave records for new matrix sessions
                     if ($session->wasRecentlyCreated) {
@@ -819,7 +830,11 @@ class AttendanceSessionService
             ->where('class_id', $class->id)
             ->where('subject_id', $subject->id)
             ->where('session_date', $sessionDate)
-            ->whereBetween('session_number', [1, $sessionCount])
+            ->whereBetween('session_number', [1, $sessionCount]);
+
+        $this->applySessionContextFilters($sessions, $filters);
+
+        $sessions = $sessions
             ->get()
             ->keyBy(fn (AttendanceSession $session) => (int) $session->session_number);
 
@@ -853,7 +868,7 @@ class AttendanceSessionService
             ->filter(fn (Students $student) => $this->studentMatchesMatrixFilters($student, $filters))
             ->sortBy(fn (Students $student) => $student->full_name_en ?: $student->full_name_kh ?: $student->id)
             ->values()
-            ->map(function (Students $student, int $index) use ($sessionCount, $recordMap, &$summary): array {
+            ->map(function (Students $student, int $index) use ($sessionCount, $recordMap, $leaveSet, &$summary): array {
                 $attendance = [];
 
                 for ($sessionNumber = 1; $sessionNumber <= $sessionCount; $sessionNumber++) {
@@ -920,6 +935,22 @@ class AttendanceSessionService
         ];
     }
 
+    private function applySessionContextFilters($query, array $filters): void
+    {
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null);
+        $majorId = $this->toNullableInt($filters['major_id'] ?? null);
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
+        $semester = $this->toNullableInt($filters['semester'] ?? null);
+
+        $query
+            ->when($academicYear, fn ($q, $value) => $q->where(fn ($slot) => $slot->where('academic_year', $value)->orWhereNull('academic_year')))
+            ->when($majorId, fn ($q, $value) => $q->where(fn ($slot) => $slot->where('major_id', $value)->orWhereNull('major_id')))
+            ->when($shiftId, fn ($q, $value) => $q->where(fn ($slot) => $slot->where('shift_id', $value)->orWhereNull('shift_id')))
+            ->when($yearLevel, fn ($q, $value) => $q->where(fn ($slot) => $slot->where('year_level', $value)->orWhereNull('year_level')))
+            ->when($semester, fn ($q, $value) => $q->where(fn ($slot) => $slot->where('semester', $value)->orWhereNull('semester')));
+    }
+
     private function findClassForMatrix(int $classId, array $filters = []): ?Classes
     {
         $query = Classes::query()
@@ -945,28 +976,57 @@ class AttendanceSessionService
         $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
         $semester = $this->toNullableInt($filters['semester'] ?? null);
 
-        $query->when($academicYear, fn ($q, $value) => $q->where('academic_year', $value));
-
-        if (!$majorId && !$shiftId && !$yearLevel && !$semester) {
+        if (!$academicYear && !$majorId && !$shiftId && !$yearLevel && !$semester) {
             return;
         }
 
-        $query->where(function ($context) use ($majorId, $shiftId, $yearLevel, $semester) {
-            $context
-                ->where(function ($direct) use ($majorId, $shiftId, $yearLevel, $semester) {
+        $query->where(function ($context) use ($academicYear, $majorId, $shiftId, $yearLevel, $semester) {
+            $hasDirectFilters = (bool) ($academicYear || $majorId || $shiftId || $yearLevel || $semester);
+            $hasProgramFilters = (bool) ($majorId || $shiftId || $yearLevel || $semester);
+            $hasScheduleFilters = (bool) ($academicYear || $shiftId || $yearLevel || $semester);
+
+            if ($hasDirectFilters) {
+                $context->where(function ($direct) use ($academicYear, $majorId, $shiftId, $yearLevel, $semester) {
                     $direct
                         ->when($majorId, fn ($q, $value) => $q->where('major_id', $value))
                         ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
                         ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
-                        ->when($semester, fn ($q, $value) => $q->where('semester', $value));
-                })
-                ->orWhereHas('programs', function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
+                        ->when($semester, fn ($q, $value) => $q->where('semester', $value))
+                        ->when($academicYear, fn ($q, $value) => $q->where('academic_year', $value));
+                });
+            }
+
+            if ($hasProgramFilters) {
+                $programClause = function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
                     $program
                         ->when($majorId, fn ($q, $value) => $q->where('major_id', $value))
                         ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
                         ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
                         ->when($semester, fn ($q, $value) => $q->where('semester', $value));
-                });
+                };
+
+                if ($hasDirectFilters) {
+                    $context->orWhereHas('programs', $programClause);
+                } else {
+                    $context->whereHas('programs', $programClause);
+                }
+            }
+
+            if ($hasScheduleFilters) {
+                $scheduleClause = function ($schedule) use ($academicYear, $shiftId, $yearLevel, $semester) {
+                    $schedule
+                        ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
+                        ->when($academicYear, fn ($q, $value) => $q->where('academic_year', $value))
+                        ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
+                        ->when($semester, fn ($q, $value) => $q->where('semester', $value));
+                };
+
+                if ($hasDirectFilters || $hasProgramFilters) {
+                    $context->orWhereHas('schedules', $scheduleClause);
+                } else {
+                    $context->whereHas('schedules', $scheduleClause);
+                }
+            }
         });
     }
 
@@ -1016,6 +1076,11 @@ class AttendanceSessionService
 
     private function subjectAllowedForMatrix(Classes $class, int $subjectId, array $filters): bool
     {
+        $scheduledSubjectIds = $this->scheduledSubjectIdsForMatrix($class, $filters);
+        if (!empty($scheduledSubjectIds)) {
+            return in_array($subjectId, $scheduledSubjectIds, true);
+        }
+
         $contexts = $this->classSubjectContexts($class, $filters);
 
         if (empty($contexts)) {
@@ -1040,6 +1105,42 @@ class AttendanceSessionService
             ->exists();
     }
 
+    private function scheduledSubjectIdsForMatrix(Classes $class, array $filters): array
+    {
+        return $this->scheduleQueryForMatrix($class, $filters)
+            ->pluck('subject_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function resolveScheduleForMatrix(Classes $class, array $filters): ?ClassSchedule
+    {
+        return $this->scheduleQueryForMatrix($class, $filters)
+            ->orderBy('id')
+            ->first();
+    }
+
+    private function scheduleQueryForMatrix(Classes $class, array $filters)
+    {
+        $subjectId = $this->toNullableInt($filters['subject_id'] ?? null);
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null);
+        $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
+        $semester = $this->toNullableInt($filters['semester'] ?? null);
+        $dayOfWeek = $this->toScheduleDay($filters['study_day'] ?? $filters['study_days'] ?? null);
+
+        return ClassSchedule::query()
+            ->where('class_id', $class->id)
+            ->when($subjectId, fn ($q, $value) => $q->where('subject_id', $value))
+            ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
+            ->when($academicYear, fn ($q, $value) => $q->where('academic_year', $value))
+            ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
+            ->when($semester, fn ($q, $value) => $q->where('semester', $value))
+            ->when($dayOfWeek, fn ($q, $value) => $q->where('day_of_week', $value));
+    }
+
     private function classSubjectContexts(Classes $class, array $filters): array
     {
         $contexts = $class->programs
@@ -1049,20 +1150,26 @@ class AttendanceSessionService
                 'semester' => $program->semester,
             ])
             ->filter(fn (array $context) => $context['major_id'])
-            ->values()
-            ->all();
+            ->values();
 
-        if (empty($contexts) && $class->major_id) {
-            $contexts[] = [
+        if ($class->major_id) {
+            $contexts->push([
                 'major_id' => $class->major_id,
                 'year_level' => $class->year_level,
                 'semester' => $class->semester,
-            ];
+            ]);
         }
 
         return array_values(array_filter(array_map(
             fn (array $context) => $this->mergeRequestedSubjectContext($context, $filters),
             $contexts
+                ->unique(fn (array $context) => implode(':', [
+                    $context['major_id'] ?? '',
+                    $context['year_level'] ?? '',
+                    $context['semester'] ?? '',
+                ]))
+                ->values()
+                ->all()
         )));
     }
 
@@ -1103,7 +1210,8 @@ class AttendanceSessionService
         $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
         $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
         $semester = $this->toNullableInt($filters['semester'] ?? null);
-        $academicYear = $this->toNullableString($filters['academic_year'] ?? null) ?? $class->academic_year;
+        $schedule = $this->resolveScheduleForMatrix($class, $filters);
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null) ?? $schedule?->academic_year ?? $class->academic_year;
 
         $program = $class->programs->first(function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
             if ($majorId && (int) ($program->major_id ?? 0) !== $majorId) {
@@ -1126,9 +1234,9 @@ class AttendanceSessionService
         });
 
         $resolvedMajorId = $majorId ?: ($program?->major_id ?: $class->major_id);
-        $resolvedShiftId = $shiftId ?: ($program?->shift_id ?: $class->shift_id);
-        $resolvedYearLevel = $yearLevel ?: ($program?->year_level ?: $class->year_level);
-        $resolvedSemester = $semester ?: ($program?->semester ?: $class->semester);
+        $resolvedShiftId = $shiftId ?: ($schedule?->shift_id ?: ($program?->shift_id ?: $class->shift_id));
+        $resolvedYearLevel = $yearLevel ?: ($schedule?->year_level ?: ($program?->year_level ?: $class->year_level));
+        $resolvedSemester = $semester ?: ($schedule?->semester ?: ($program?->semester ?: $class->semester));
 
         return [
             'major_id' => $resolvedMajorId,
@@ -1474,6 +1582,25 @@ class AttendanceSessionService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function toScheduleDay(mixed $value): ?string
+    {
+        $value = $this->toNullableString($value);
+        if (!$value) {
+            return null;
+        }
+
+        $normalized = strtolower($value);
+        $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+        foreach ($days as $day) {
+            if ($normalized === $day || str_starts_with($normalized, substr($day, 0, 3))) {
+                return ucfirst($day);
+            }
+        }
+
+        return null;
     }
 }
 

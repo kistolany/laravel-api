@@ -28,6 +28,7 @@ use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\Chat\ChatController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
+use App\Http\Controllers\ApiController\SubjectClassroom\SubjectClassroomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -89,6 +90,7 @@ Route::prefix('v1')->group(function () {
         Route::get('list', [TeacherAuthController::class, 'index']);
         Route::delete('{id}', [TeacherAuthController::class, 'destroy']);
         Route::post('register', [TeacherAuthController::class, 'register']);
+        Route::post('{id}', [TeacherAuthController::class, 'update']);
         Route::post('upload-image', [TeacherAuthController::class, 'uploadImage']);
         Route::post('login', [TeacherAuthController::class, 'login'])->middleware('throttle:login');
         Route::post('refresh', [TeacherAuthController::class, 'refresh']);
@@ -265,17 +267,23 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('communes', CommuneController::class)->only(['store'])->middleware('permission:commune.create');
         Route::apiResource('communes', CommuneController::class)->only(['update'])->middleware('permission:commune.update');
         Route::apiResource('communes', CommuneController::class)->only(['destroy'])->middleware('permission:commune.delete');
+
+
     });
 
-    // Route::middleware('auth.teacher')->prefix('teacher')->group(function () {
-    //     Route::get('students', [TeacherModuleController::class, 'students']);
-    //     Route::get('classes', [TeacherModuleController::class, 'classes']);
-    //     Route::get('classes/{id}/students', [TeacherModuleController::class, 'classStudents']);
-    //     Route::get('attendance/options', [TeacherModuleController::class, 'attendanceOptions']);
-    //     Route::get('attendance/history', [TeacherModuleController::class, 'attendanceHistory']);
-    //     Route::get('attendance/history/{id}', [TeacherModuleController::class, 'attendanceShow']);
-    //     Route::post('attendance/sessions', [TeacherModuleController::class, 'attendanceStore']);
-    //     Route::post('attendance/sessions/{id}/records', [TeacherModuleController::class, 'attendanceRecord']);
-    // });
+    // Subject Classroom routes (Lessons, Homework, Submissions)
+    // Accessible by both Teachers and Users (Admins/Students)
+    Route::middleware('auth.unified')->prefix('subject-classroom')->group(function () {
+        Route::get('lessons', [SubjectClassroomController::class, 'lessons']);
+        Route::post('lessons', [SubjectClassroomController::class, 'storeLesson']);
+        Route::delete('lessons/{id}', [SubjectClassroomController::class, 'destroyLesson'])->whereNumber('id');
+        Route::get('homework', [SubjectClassroomController::class, 'homework']);
+        Route::post('homework', [SubjectClassroomController::class, 'storeHomework']);
+        Route::put('homework/{id}', [SubjectClassroomController::class, 'updateHomework'])->whereNumber('id');
+        Route::delete('homework/{id}', [SubjectClassroomController::class, 'destroyHomework'])->whereNumber('id');
+        Route::get('homework/{id}/submissions', [SubjectClassroomController::class, 'submissions'])->whereNumber('id');
+        Route::post('homework/{id}/submit', [SubjectClassroomController::class, 'submitHomework'])->whereNumber('id');
+        Route::patch('submissions/{id}/grade', [SubjectClassroomController::class, 'gradeSubmission'])->whereNumber('id');
+    });
 
 });

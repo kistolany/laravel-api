@@ -56,6 +56,17 @@ class TeacherAuthController extends Controller
         return $this->success(TeacherAuthResource::teacher($teacher), 'Teacher registered successfully.');
     }
 
+    public function update(TeacherRequest $request, int $id): JsonResponse
+    {
+        try {
+            $teacher = $this->service->update($id, $request->validated());
+        } catch (ApiException $e) {
+            return $e->render($request);
+        }
+
+        return $this->success(TeacherResource::collection([\App\Models\Teacher::find($id)]), 'Teacher updated successfully.');
+    }
+
     public function uploadImage(TeacherRequest $request): JsonResponse
     {
         try {
