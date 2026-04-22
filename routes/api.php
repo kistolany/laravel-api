@@ -26,6 +26,7 @@ use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
+use App\Http\Controllers\ApiController\Chat\ChatController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -131,7 +132,8 @@ Route::prefix('v1')->group(function () {
         Route::get('students/{id}/classes', [StudentController::class, 'classes'])->middleware('permission:student.classes.view');
 
         // Student Card routes
-        Route::get('student-card/{student_id}', [StudentCardController::class, 'show'])->middleware('permission:student.card.view');
+        Route::get('student-cards', [StudentCardController::class, 'index'])->middleware('permission:student.card.view');
+        Route::get('student-card/{student_id}', [StudentCardController::class, 'show'])->whereNumber('student_id')->middleware('permission:student.card.view');
         Route::get('student-card/major/{major}', [StudentCardController::class, 'byMajor'])->middleware('permission:student.card.by_major.view');
 
         // Class routes
@@ -172,6 +174,18 @@ Route::prefix('v1')->group(function () {
         Route::post('leave-requests', [LeaveRequestController::class, 'store'])->middleware('permission:leave_request.create');
         Route::patch('leave-requests/{id}/status', [LeaveRequestController::class, 'updateStatus'])->middleware('permission:leave_request.approve');
         Route::delete('leave-requests/{id}', [LeaveRequestController::class, 'destroy'])->middleware('permission:leave_request.delete');
+
+        // Chat / Messaging
+        Route::prefix('chat')->group(function () {
+            Route::get('users', [ChatController::class, 'users']);
+            Route::get('conversations', [ChatController::class, 'conversations']);
+            Route::post('conversations', [ChatController::class, 'findOrCreate']);
+            Route::get('conversations/{id}/messages', [ChatController::class, 'messages'])->whereNumber('id');
+            Route::post('conversations/{id}/messages', [ChatController::class, 'sendMessage'])->whereNumber('id');
+            Route::patch('conversations/{id}/read', [ChatController::class, 'markRead'])->whereNumber('id');
+            Route::get('unread-count', [ChatController::class, 'unreadCount']);
+            Route::delete('messages/{messageId}', [ChatController::class, 'deleteMessage'])->whereNumber('messageId');
+        });
 
         // Student score routes
         Route::get('student-scores/grade-book', [StudentScoreController::class, 'gradeBook'])->middleware('permission:student.view');

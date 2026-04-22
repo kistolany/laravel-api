@@ -830,6 +830,16 @@ class AttendanceSessionService
             }
         }
 
+        // Fetch all approved leaves for this date for students in this class
+        $approvedLeaves = \App\Models\LeaveRequest::where('requester_type', 'student')
+            ->where('status', 'approved')
+            ->where('start_date', '<=', $sessionDate)
+            ->where('end_date', '>=', $sessionDate)
+            ->whereIn('requester_id', $studentIds)
+            ->pluck('requester_id')
+            ->toArray();
+        $leaveSet = array_flip($approvedLeaves);
+
         $summary = [
             'total_students' => 0,
             'total_sessions' => $sessionCount,
@@ -847,7 +857,7 @@ class AttendanceSessionService
                 $attendance = [];
 
                 for ($sessionNumber = 1; $sessionNumber <= $sessionCount; $sessionNumber++) {
-                    $status = $recordMap[$sessionNumber][$student->id] ?? 'Att';
+                    $status = $recordMap[$sessionNumber][$student->id] ?? (isset($leaveSet[$student->id]) ? 'P' : 'Att');
                     $attendance[] = $status;
 
                     match ($status) {
@@ -903,6 +913,8 @@ class AttendanceSessionService
                 'name' => $context['shift']?->name,
                 'time_range' => $context['shift']?->time_range,
             ],
+            'saved_sessions' => $sessions->count(),
+            'has_saved_attendance' => $sessions->isNotEmpty(),
             'students' => $students,
             'summary' => $summary,
         ];
