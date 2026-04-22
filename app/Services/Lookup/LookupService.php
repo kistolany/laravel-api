@@ -7,6 +7,7 @@ use App\Services\BaseService;
 use App\Models\AcademicInfo;
 use App\Models\Classes;
 use App\Models\ClassProgram;
+use App\Models\ClassSchedule;
 use App\Models\Commune;
 use App\Models\District;
 use App\Models\Faculty;
@@ -325,6 +326,147 @@ class LookupService extends BaseService
         });
     }
 
+    public function getAttendanceFilters(): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn): array {
+            return $this->rememberLookup($fn, [], fn (): array => [
+                'stages' => $this->getStages(),
+                'batch-years' => $this->getBatchYears(),
+                'semesters' => $this->getSemesters(),
+                'academic-years' => $this->getAcademicYears(),
+                'study-days' => $this->getStudyDays(),
+                'faculties' => Faculty::query()
+                    ->select('id', 'name')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Faculty $faculty) => [
+                        'id' => $faculty->id,
+                        'name' => $faculty->name,
+                    ])
+                    ->all(),
+                'majors' => Major::query()
+                    ->select('id', 'faculty_id', 'name')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Major $major) => [
+                        'id' => $major->id,
+                        'faculty_id' => $major->faculty_id,
+                        'name' => $major->name,
+                    ])
+                    ->all(),
+                'shifts' => Shift::query()
+                    ->select('id', 'name', 'time_range')
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Shift $shift) => [
+                        'id' => $shift->id,
+                        'name' => $shift->name,
+                        'time_range' => $shift->time_range,
+                    ])
+                    ->all(),
+            ]);
+        });
+    }
+
+    public function getAttendanceClasses(array $rawFilters = []): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $rawFilters): array {
+            $filters = $this->normalizeAttendanceLookupFilters($rawFilters);
+
+            return $this->rememberLookup($fn, $filters, function () use ($filters): array {
+                $query = Classes::query()
+                    ->select('classes.id', 'classes.name')
+                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('classes.academic_year', $value));
+
+                if ($this->hasAttendanceClassContextFilters($filters)) {
+                    $query->where(function ($contextQuery) use ($filters) {
+                        $this->applyAttendanceClassContextFilters($contextQuery, $filters);
+                    });
+                }
+
+                $query->whereExists(function ($studentQuery) use ($filters) {
+                    $studentQuery
+                        ->selectRaw('1')
+                        ->from('class_students')
+                        ->join('academic_info', 'academic_info.student_id', '=', 'class_students.student_id')
+                        ->leftJoin('majors as student_majors', 'student_majors.id', '=', 'academic_info.major_id')
+                        ->whereColumn('class_students.class_id', 'classes.id')
+                        ->where('class_students.status', 'Active');
+
+                    $this->applyAttendanceAcademicFilters($studentQuery, $filters, 'academic_info', 'student_majors');
+                });
+
+                return $query
+                    ->orderBy('classes.name')
+                    ->get()
+                    ->map(fn (Classes $class) => [
+                        'id' => $class->id,
+                        'name' => $class->name,
+                    ])
+                    ->all();
+            });
+        });
+    }
+
+    public function getAttendanceSubjects(array $rawFilters = []): array
+    {
+        $fn = __FUNCTION__;
+        return $this->trace($fn, function () use ($fn, $rawFilters): array {
+            $filters = $this->normalizeAttendanceLookupFilters($rawFilters);
+
+            return $this->rememberLookup($fn, $filters, function () use ($filters): array {
+                $contexts = $this->attendanceSubjectContexts($filters);
+                $needsCurriculumFilter = $filters['class_id']
+                    || $filters['major_id']
+                    || $filters['year_level']
+                    || $filters['semester'];
+
+                if ($filters['class_id'] && empty($contexts)) {
+                    return [];
+                }
+
+                if ($filters['class_id']) {
+                    $scheduled = $this->getScheduledAttendanceSubjects($filters);
+
+                    if (!empty($scheduled)) {
+                        return $scheduled;
+                    }
+                }
+
+                $query = Subject::query()->select('id', 'name');
+
+                if (!empty($contexts)) {
+                    $query->whereIn('id', MajorSubject::query()
+                        ->select('subject_id')
+                        ->where(function ($contextQuery) use ($contexts) {
+                            foreach ($contexts as $context) {
+                                $contextQuery->orWhere(function ($slot) use ($context) {
+                                    $this->applyMajorSubjectContext($slot, $context);
+                                });
+                            }
+                        }));
+                } elseif ($needsCurriculumFilter) {
+                    $query->whereIn('id', MajorSubject::query()
+                        ->select('subject_id')
+                        ->when($filters['major_id'], fn ($q, $value) => $q->where('major_id', $value))
+                        ->when($filters['year_level'], fn ($q, $value) => $q->where('year_level', $value))
+                        ->when($filters['semester'], fn ($q, $value) => $q->where('semester', $value)));
+                }
+
+                return $query
+                    ->orderBy('name')
+                    ->get()
+                    ->map(fn (Subject $subject) => [
+                        'id' => $subject->id,
+                        'name' => $subject->name,
+                    ])
+                    ->all();
+            });
+        });
+    }
+
     public function getStudentTypes(): array
     {
         $fn = __FUNCTION__;
@@ -388,6 +530,187 @@ class LookupService extends BaseService
         });
     }
 
+    private function normalizeAttendanceLookupFilters(array $filters): array
+    {
+        return [
+            'class_id' => $this->toNullableInt($filters['class_id'] ?? null),
+            'faculty_id' => $this->toNullableInt($filters['faculty_id'] ?? null),
+            'major_id' => $this->toNullableInt($filters['major_id'] ?? null),
+            'shift_id' => $this->toNullableInt($filters['shift_id'] ?? null),
+            'year_level' => $this->toNullableInt($filters['year_level'] ?? $filters['stage'] ?? null),
+            'semester' => $this->toNullableInt($filters['semester'] ?? null),
+            'batch_year' => $this->toNullableString($filters['batch_year'] ?? $filters['batch'] ?? null),
+            'academic_year' => $this->toNullableString($filters['academic_year'] ?? null),
+            'study_day' => $this->toNullableString($filters['study_day'] ?? $filters['study_days'] ?? null),
+        ];
+    }
+
+    private function hasAttendanceClassContextFilters(array $filters): bool
+    {
+        return (bool) (
+            $filters['faculty_id']
+            || $filters['major_id']
+            || $filters['shift_id']
+            || $filters['year_level']
+            || $filters['semester']
+        );
+    }
+
+    private function applyAttendanceClassContextFilters($query, array $filters): void
+    {
+        $query
+            ->where(function ($direct) use ($filters) {
+                $direct
+                    ->when($filters['major_id'], fn ($q, $value) => $q->where('classes.major_id', $value))
+                    ->when($filters['shift_id'], fn ($q, $value) => $q->where('classes.shift_id', $value))
+                    ->when($filters['year_level'], fn ($q, $value) => $q->where('classes.year_level', $value))
+                    ->when($filters['semester'], fn ($q, $value) => $q->where('classes.semester', $value));
+
+                if ($filters['faculty_id'] && !$filters['major_id']) {
+                    $direct->whereIn('classes.major_id', Major::query()
+                        ->select('id')
+                        ->where('faculty_id', $filters['faculty_id']));
+                }
+            })
+            ->orWhereExists(function ($program) use ($filters) {
+                $program
+                    ->selectRaw('1')
+                    ->from('class_programs')
+                    ->leftJoin('majors as program_majors', 'program_majors.id', '=', 'class_programs.major_id')
+                    ->whereColumn('class_programs.class_id', 'classes.id')
+                    ->when($filters['major_id'], fn ($q, $value) => $q->where('class_programs.major_id', $value))
+                    ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_programs.shift_id', $value))
+                    ->when($filters['year_level'], fn ($q, $value) => $q->where('class_programs.year_level', $value))
+                    ->when($filters['semester'], fn ($q, $value) => $q->where('class_programs.semester', $value));
+
+                if ($filters['faculty_id'] && !$filters['major_id']) {
+                    $program->where('program_majors.faculty_id', $filters['faculty_id']);
+                }
+            });
+    }
+
+    private function applyAttendanceAcademicFilters($query, array $filters, string $academicTable, string $majorTable): void
+    {
+        $query
+            ->when($filters['major_id'], fn ($q, $value) => $q->where("{$academicTable}.major_id", $value))
+            ->when($filters['shift_id'], fn ($q, $value) => $q->where("{$academicTable}.shift_id", $value))
+            ->when($filters['batch_year'], fn ($q, $value) => $q->where("{$academicTable}.batch_year", $value))
+            ->when($filters['study_day'], fn ($q, $value) => $q->where("{$academicTable}.study_days", $value));
+
+        if ($filters['faculty_id']) {
+            $query->where("{$majorTable}.faculty_id", $filters['faculty_id']);
+        }
+
+        if ($filters['year_level']) {
+            $query->where(function ($stageQuery) use ($academicTable, $filters) {
+                $stageQuery
+                    ->where("{$academicTable}.stage", (string) $filters['year_level'])
+                    ->orWhere("{$academicTable}.stage", 'Year ' . $filters['year_level']);
+            });
+        }
+    }
+
+    private function attendanceSubjectContexts(array $filters): array
+    {
+        if (!$filters['class_id']) {
+            return $filters['major_id'] || $filters['year_level'] || $filters['semester']
+                ? [$this->onlyContextValues($filters)]
+                : [];
+        }
+
+        $class = Classes::query()
+            ->with('programs')
+            ->find($filters['class_id']);
+
+        if (!$class) {
+            return [];
+        }
+
+        $contexts = $class->programs
+            ->map(fn (ClassProgram $program) => [
+                'major_id' => $program->major_id,
+                'year_level' => $program->year_level,
+                'semester' => $program->semester,
+            ])
+            ->filter(fn (array $context) => $context['major_id'])
+            ->values()
+            ->all();
+
+        if (empty($contexts) && $class->major_id) {
+            $contexts[] = [
+                'major_id' => $class->major_id,
+                'year_level' => $class->year_level,
+                'semester' => $class->semester,
+            ];
+        }
+
+        return array_values(array_filter(array_map(
+            fn (array $context) => $this->mergeRequestedContext($context, $filters),
+            $contexts
+        )));
+    }
+
+    private function getScheduledAttendanceSubjects(array $filters): array
+    {
+        $query = ClassSchedule::query()
+            ->join('subjects', 'subjects.id', '=', 'class_schedules.subject_id')
+            ->where('class_schedules.class_id', $filters['class_id'])
+            ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_schedules.shift_id', $value))
+            ->when($filters['academic_year'], fn ($q, $value) => $q->where('class_schedules.academic_year', $value))
+            ->when($filters['year_level'], fn ($q, $value) => $q->where('class_schedules.year_level', $value))
+            ->when($filters['semester'], fn ($q, $value) => $q->where('class_schedules.semester', $value));
+
+        $dayOfWeek = $this->toScheduleDay($filters['study_day']);
+        if ($dayOfWeek) {
+            $query->where('class_schedules.day_of_week', $dayOfWeek);
+        }
+
+        return $query
+            ->select('subjects.id', 'subjects.name')
+            ->distinct()
+            ->orderBy('subjects.name')
+            ->get()
+            ->map(fn ($subject) => [
+                'id' => $subject->id,
+                'name' => $subject->name,
+            ])
+            ->all();
+    }
+
+    private function mergeRequestedContext(array $context, array $filters): ?array
+    {
+        foreach (['major_id', 'year_level', 'semester'] as $key) {
+            if (!$filters[$key]) {
+                continue;
+            }
+
+            if (!empty($context[$key]) && (int) $context[$key] !== (int) $filters[$key]) {
+                return null;
+            }
+
+            $context[$key] = $filters[$key];
+        }
+
+        return $context;
+    }
+
+    private function onlyContextValues(array $filters): array
+    {
+        return [
+            'major_id' => $filters['major_id'],
+            'year_level' => $filters['year_level'],
+            'semester' => $filters['semester'],
+        ];
+    }
+
+    private function applyMajorSubjectContext($query, array $context): void
+    {
+        $query
+            ->when($context['major_id'] ?? null, fn ($q, $value) => $q->where('major_id', $value))
+            ->when($context['year_level'] ?? null, fn ($q, $value) => $q->where('year_level', $value))
+            ->when($context['semester'] ?? null, fn ($q, $value) => $q->where('semester', $value));
+    }
+
     private function rememberLookup(string $name, array $params, callable $callback): mixed
     {
         if (!config('cache.lookup.enabled', true)) {
@@ -421,6 +744,35 @@ class LookupService extends BaseService
         // Handle "Year 1", "Year 2" etc. from AcademicInfo.stage
         $extracted = (int) filter_var($value, FILTER_SANITIZE_NUMBER_INT);
         return $extracted > 0 ? $extracted : null;
+    }
+
+    private function toNullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
+    }
+
+    private function toScheduleDay(?string $value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+        foreach ($days as $day) {
+            if ($normalized === $day || str_starts_with($normalized, substr($day, 0, 3))) {
+                return ucfirst($day);
+            }
+        }
+
+        return null;
     }
 }
 

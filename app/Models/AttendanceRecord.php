@@ -13,6 +13,7 @@ class AttendanceRecord extends Model
         'attendance_session_id',
         'student_id',
         'status',
+        'note',
     ];
 
     public function session(): BelongsTo

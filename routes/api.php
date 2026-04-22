@@ -25,6 +25,7 @@ use App\Http\Controllers\ApiController\Subject\SubjectController;
 use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
+use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -51,6 +52,9 @@ Route::prefix('v1')->group(function () {
         Route::get('semesters', [LookupController::class, 'semesters']);
         Route::get('study-days', [LookupController::class, 'studyDays']);
         Route::get('score-filters', [LookupController::class, 'scoreFilters']);
+        Route::get('attendance-filters', [LookupController::class, 'attendanceFilters']);
+        Route::get('attendance-classes', [LookupController::class, 'attendanceClasses']);
+        Route::get('attendance-subjects', [LookupController::class, 'attendanceSubjects']);
         Route::get('provinces', [LookupController::class, 'provinces']);
         Route::get('districts', [LookupController::class, 'districts']);
         Route::get('communes', [LookupController::class, 'communes']);
@@ -100,10 +104,10 @@ Route::prefix('v1')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'stats']);
 
         // Teacher Attendance routes
-        Route::get('teacher-attendances',         [TeacherAttendanceController::class, 'index']);
-        Route::post('teacher-attendances/bulk',   [TeacherAttendanceController::class, 'bulk']);
-        Route::get('teacher-attendances/history', [TeacherAttendanceController::class, 'history']);
-        Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report']);
+        Route::get('teacher-attendances',         [TeacherAttendanceController::class, 'index'])->middleware('permission:teacher_attendance.view');
+        Route::post('teacher-attendances/bulk',   [TeacherAttendanceController::class, 'bulk'])->middleware('permission:teacher_attendance.create');
+        Route::get('teacher-attendances/history', [TeacherAttendanceController::class, 'history'])->middleware('permission:teacher_attendance.view');
+        Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report'])->middleware('permission:teacher_attendance.view');
 
         // Role & Permission management (Admin only)
         Route::middleware('role:Admin')->group(function () {
@@ -157,11 +161,17 @@ Route::prefix('v1')->group(function () {
         Route::get('attendance-sessions', [AttendanceSessionController::class, 'index'])->middleware('permission:attendance.view');
         Route::get('attendance-sessions/matrix', [AttendanceSessionController::class, 'matrix'])->middleware('permission:attendance.view');
         Route::post('attendance-sessions/matrix', [AttendanceSessionController::class, 'saveMatrix'])->middleware('permission:attendance.create|attendance.record');
-        Route::get('attendance-sessions/major/{majorId}', [AttendanceSessionController::class, 'byMajor'])->middleware('permission:attendance.view');
-        Route::get('attendance-sessions/major/{majorId}/subject/{subjectId}/report', [AttendanceSessionController::class, 'reportByMajorAndSubject'])->middleware('permission:attendance.report.by_major_subject');
-        Route::get('attendance-sessions/{id}', [AttendanceSessionController::class, 'show'])->middleware('permission:attendance.view');
+        Route::get('attendance-sessions/major/{majorId}', [AttendanceSessionController::class, 'byMajor'])->whereNumber('majorId')->middleware('permission:attendance.view');
+        Route::get('attendance-sessions/major/{majorId}/subject/{subjectId}/report', [AttendanceSessionController::class, 'reportByMajorAndSubject'])->whereNumber('majorId')->whereNumber('subjectId')->middleware('permission:attendance.report.by_major_subject');
+        Route::get('attendance-sessions/{id}', [AttendanceSessionController::class, 'show'])->whereNumber('id')->middleware('permission:attendance.view');
         Route::post('attendance-sessions', [AttendanceSessionController::class, 'store'])->middleware('permission:attendance.create');
-        Route::post('attendance-sessions/{id}/records', [AttendanceSessionController::class, 'record'])->middleware('permission:attendance.record');
+        Route::post('attendance-sessions/{id}/records', [AttendanceSessionController::class, 'record'])->whereNumber('id')->middleware('permission:attendance.record');
+
+        // Leave Requests
+        Route::get('leave-requests', [LeaveRequestController::class, 'index'])->middleware('permission:leave_request.view');
+        Route::post('leave-requests', [LeaveRequestController::class, 'store'])->middleware('permission:leave_request.create');
+        Route::patch('leave-requests/{id}/status', [LeaveRequestController::class, 'updateStatus'])->middleware('permission:leave_request.approve');
+        Route::delete('leave-requests/{id}', [LeaveRequestController::class, 'destroy'])->middleware('permission:leave_request.delete');
 
         // Student score routes
         Route::get('student-scores/grade-book', [StudentScoreController::class, 'gradeBook'])->middleware('permission:student.view');

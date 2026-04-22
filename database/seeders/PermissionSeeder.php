@@ -26,6 +26,11 @@ class PermissionSeeder extends Seeder
             'student.card.view',
             'student.card.by_major.view',
 
+            'teacher.view',
+            'teacher.create',
+            'teacher.update',
+            'teacher.delete',
+
             'class.view',
             'class.create',
             'class.delete',
@@ -103,6 +108,32 @@ class PermissionSeeder extends Seeder
             'class_schedule.create',
             'class_schedule.update',
             'class_schedule.delete',
+
+            'teacher_attendance.view',
+            'teacher_attendance.create',
+            'teacher_attendance.update',
+            'teacher_attendance.delete',
+            'teacher_attendance.report',
+
+            'leave_request.view',
+            'leave_request.create',
+            'leave_request.update',
+            'leave_request.delete',
+            'leave_request.approve',
+
+            'role.view',
+            'role.create',
+            'role.update',
+            'role.delete',
+
+            'audit_log.view',
+
+            'exam.view',
+            'exam.create',
+            'exam.update',
+            'exam.delete',
+
+            'id_card.view',
         ];
 
         foreach ($permissions as $permission) {

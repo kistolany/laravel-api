@@ -11,7 +11,9 @@ use App\Http\Resources\Attendance\AttendanceSessionDetailResource;
 use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classes;
+use App\Models\Major;
 use App\Models\MajorSubject;
+use App\Models\Shift;
 use App\Models\Students;
 use App\Models\Subject;
 use App\Models\Teacher;
@@ -287,7 +289,7 @@ class AttendanceSessionService
                 ]);
             }
 
-            $class = $this->findClassForMatrix($classId);
+            $class = $this->findClassForMatrix($classId, $filters);
             if (!$class) {
                 return $this->errorResponse(404, 'Class not found.');
             }
@@ -295,6 +297,14 @@ class AttendanceSessionService
             $subject = Subject::find($subjectId);
             if (!$subject) {
                 return $this->errorResponse(404, 'Subject not found.');
+            }
+
+            if (!$this->subjectAllowedForMatrix($class, $subjectId, $filters)) {
+                return $this->errorResponse(422, 'Validation failed.', [
+                    'errors' => [
+                        'subject_id' => ['Subject is not assigned to the selected class filters.'],
+                    ],
+                ]);
             }
 
             return $this->successResponse(
@@ -314,7 +324,7 @@ class AttendanceSessionService
     public function saveMatrixResponse(array $data): array
     {
         return $this->trace(__FUNCTION__, function () use ($data): array {
-            $class = $this->findClassForMatrix((int) $data['class_id']);
+            $class = $this->findClassForMatrix((int) $data['class_id'], $data);
             if (!$class) {
                 return $this->errorResponse(404, 'Class not found.');
             }
@@ -322,6 +332,14 @@ class AttendanceSessionService
             $subject = Subject::find((int) $data['subject_id']);
             if (!$subject) {
                 return $this->errorResponse(404, 'Subject not found.');
+            }
+
+            if (!$this->subjectAllowedForMatrix($class, (int) $data['subject_id'], $data)) {
+                return $this->errorResponse(422, 'Validation failed.', [
+                    'errors' => [
+                        'subject_id' => ['Subject is not assigned to the selected class filters.'],
+                    ],
+                ]);
             }
 
             $sessionDate = $this->formatDate($data['session_date']);
@@ -357,11 +375,13 @@ class AttendanceSessionService
 
             $savedRecords = 0;
 
-            DB::transaction(function () use ($class, $subject, $sessionDate, $sessionCount, $validRecords, &$savedRecords): void {
+            $context = $this->resolveClassAttendanceContext($class, $data);
+
+            DB::transaction(function () use ($class, $subject, $sessionDate, $sessionCount, $validRecords, $context, &$savedRecords): void {
                 $sessions = [];
 
                 for ($sessionNumber = 1; $sessionNumber <= $sessionCount; $sessionNumber++) {
-                    $sessions[$sessionNumber] = AttendanceSession::firstOrCreate(
+                    $session = AttendanceSession::firstOrCreate(
                         [
                             'class_id' => $class->id,
                             'subject_id' => $subject->id,
@@ -370,13 +390,32 @@ class AttendanceSessionService
                         ],
                         [
                             'teacher_id' => null,
-                            'major_id' => $class->major_id,
-                            'shift_id' => $class->shift_id,
-                            'academic_year' => $class->academic_year,
-                            'year_level' => $class->year_level,
-                            'semester' => $class->semester,
+                            'major_id' => $context['major_id'],
+                            'shift_id' => $context['shift_id'],
+                            'academic_year' => $context['academic_year'],
+                            'year_level' => $context['year_level'],
+                            'semester' => $context['semester'],
                         ]
                     );
+
+                    // Auto-inject Leave records for new matrix sessions
+                    if ($session->wasRecentlyCreated) {
+                        $leaveStudents = \App\Models\LeaveRequest::where('requester_type', 'student')
+                            ->where('status', 'approved')
+                            ->where('start_date', '<=', $sessionDate)
+                            ->where('end_date', '>=', $sessionDate)
+                            ->whereIn('requester_id', $class->students->pluck('id'))
+                            ->get();
+                            
+                        foreach ($leaveStudents as $leave) {
+                            \App\Models\AttendanceRecord::updateOrCreate(
+                                ['attendance_session_id' => $session->id, 'student_id' => $leave->requester_id],
+                                ['status' => 'Leave']
+                            );
+                        }
+                    }
+                    
+                    $sessions[$sessionNumber] = $session;
                 }
 
                 $now = now();
@@ -406,7 +445,7 @@ class AttendanceSessionService
                 $savedRecords = count($rows);
             });
 
-            $class->load(['students.academicInfo.major', 'major', 'shift', 'programs.major', 'programs.shift']);
+            $class = $this->findClassForMatrix((int) $data['class_id'], $data) ?? $class;
 
             return $this->successResponse(
                 200,
@@ -766,8 +805,17 @@ class AttendanceSessionService
 
     private function buildMatrixPayload(Classes $class, Subject $subject, string $sessionDate, int $sessionCount, array $filters = []): array
     {
+        $studentIds = $class->students
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
         $sessions = AttendanceSession::query()
-            ->with('records')
+            ->with(['records' => function ($query) use ($studentIds) {
+                empty($studentIds)
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereIn('student_id', $studentIds);
+            }])
             ->where('class_id', $class->id)
             ->where('subject_id', $subject->id)
             ->where('session_date', $sessionDate)
@@ -829,9 +877,7 @@ class AttendanceSessionService
             })
             ->all();
 
-        $program = $class->relationLoaded('programs') ? $class->programs->first() : null;
-        $major = $class->major ?? $program?->major;
-        $shift = $class->shift ?? $program?->shift;
+        $context = $this->resolveClassAttendanceContext($class, $filters);
 
         return [
             'session_date' => $sessionDate,
@@ -839,36 +885,282 @@ class AttendanceSessionService
             'class' => [
                 'id' => $class->id,
                 'name' => $class->name ?? $class->code,
-                'code' => $class->code,
-                'academic_year' => $class->academic_year,
-                'year_level' => $class->year_level,
-                'semester' => $class->semester,
+                'academic_year' => $context['academic_year'],
+                'year_level' => $context['year_level'],
+                'semester' => $context['semester'],
             ],
             'major' => [
-                'id' => $major?->id,
-                'name' => $major?->name,
+                'id' => $context['major']?->id,
+                'name' => $context['major']?->name,
             ],
             'subject' => [
                 'id' => $subject->id,
-                'code' => $subject->subject_Code,
                 'name' => $subject->name,
-                'label' => trim(($subject->subject_Code ? $subject->subject_Code . ' - ' : '') . ($subject->name ?? '')),
+                'label' => $subject->name,
             ],
             'shift' => [
-                'id' => $shift?->id,
-                'name' => $shift?->name,
-                'time_range' => $shift?->time_range,
+                'id' => $context['shift']?->id,
+                'name' => $context['shift']?->name,
+                'time_range' => $context['shift']?->time_range,
             ],
             'students' => $students,
             'summary' => $summary,
         ];
     }
 
-    private function findClassForMatrix(int $classId): ?Classes
+    private function findClassForMatrix(int $classId, array $filters = []): ?Classes
     {
-        return Classes::query()
-            ->with(['students.academicInfo.major.faculty', 'major', 'shift', 'programs.major', 'programs.shift'])
-            ->find($classId);
+        $query = Classes::query()
+            ->with(['major', 'shift', 'programs.major', 'programs.shift'])
+            ->with(['students' => function ($query) use ($filters) {
+                $query
+                    ->wherePivot('status', 'Active')
+                    ->with('academicInfo.major.faculty');
+
+                $this->applyStudentMatrixFilters($query, $filters);
+            }]);
+
+        $this->applyClassMatrixFilters($query, $filters);
+
+        return $query->find($classId);
+    }
+
+    private function applyClassMatrixFilters($query, array $filters): void
+    {
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null);
+        $majorId = $this->toNullableInt($filters['major_id'] ?? null);
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
+        $semester = $this->toNullableInt($filters['semester'] ?? null);
+
+        $query->when($academicYear, fn ($q, $value) => $q->where('academic_year', $value));
+
+        if (!$majorId && !$shiftId && !$yearLevel && !$semester) {
+            return;
+        }
+
+        $query->where(function ($context) use ($majorId, $shiftId, $yearLevel, $semester) {
+            $context
+                ->where(function ($direct) use ($majorId, $shiftId, $yearLevel, $semester) {
+                    $direct
+                        ->when($majorId, fn ($q, $value) => $q->where('major_id', $value))
+                        ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
+                        ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
+                        ->when($semester, fn ($q, $value) => $q->where('semester', $value));
+                })
+                ->orWhereHas('programs', function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
+                    $program
+                        ->when($majorId, fn ($q, $value) => $q->where('major_id', $value))
+                        ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
+                        ->when($yearLevel, fn ($q, $value) => $q->where('year_level', $value))
+                        ->when($semester, fn ($q, $value) => $q->where('semester', $value));
+                });
+        });
+    }
+
+    private function applyStudentMatrixFilters($query, array $filters): void
+    {
+        $majorId = $this->toNullableInt($filters['major_id'] ?? null);
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        $facultyId = $this->toNullableInt($filters['faculty_id'] ?? null);
+        $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
+        $batchYear = $this->toNullableString($filters['batch_year'] ?? $filters['batch'] ?? null);
+        $studyDay = $this->toNullableString($filters['study_day'] ?? $filters['study_days'] ?? null);
+
+        $studentName = $this->toNullableString($filters['student_name'] ?? $filters['search'] ?? null);
+
+        if ($studentName) {
+            $query->where(function ($q) use ($studentName) {
+                $q->where('full_name_en', 'like', "%{$studentName}%")
+                    ->orWhere('full_name_kh', 'like', "%{$studentName}%")
+                    ->orWhere('id_card_number', 'like', "%{$studentName}%");
+            });
+        }
+
+        if (!$majorId && !$shiftId && !$facultyId && !$yearLevel && !$batchYear && !$studyDay) {
+            return;
+        }
+
+        $query->whereHas('academicInfo', function ($academic) use ($majorId, $shiftId, $facultyId, $yearLevel, $batchYear, $studyDay) {
+            $academic
+                ->when($majorId, fn ($q, $value) => $q->where('major_id', $value))
+                ->when($shiftId, fn ($q, $value) => $q->where('shift_id', $value))
+                ->when($batchYear, fn ($q, $value) => $q->where('batch_year', $value))
+                ->when($studyDay, fn ($q, $value) => $q->where('study_days', $value));
+
+            if ($facultyId) {
+                $academic->whereHas('major', fn ($major) => $major->where('faculty_id', $facultyId));
+            }
+
+            if ($yearLevel) {
+                $academic->where(function ($stage) use ($yearLevel) {
+                    $stage
+                        ->where('stage', (string) $yearLevel)
+                        ->orWhere('stage', 'Year ' . $yearLevel);
+                });
+            }
+        });
+    }
+
+    private function subjectAllowedForMatrix(Classes $class, int $subjectId, array $filters): bool
+    {
+        $contexts = $this->classSubjectContexts($class, $filters);
+
+        if (empty($contexts)) {
+            return true;
+        }
+
+        $curriculumQuery = MajorSubject::query()
+            ->where(function ($query) use ($contexts) {
+                foreach ($contexts as $context) {
+                    $query->orWhere(function ($slot) use ($context) {
+                        $this->applyMajorSubjectContext($slot, $context);
+                    });
+                }
+            });
+
+        if (!(clone $curriculumQuery)->exists()) {
+            return true;
+        }
+
+        return $curriculumQuery
+            ->where('subject_id', $subjectId)
+            ->exists();
+    }
+
+    private function classSubjectContexts(Classes $class, array $filters): array
+    {
+        $contexts = $class->programs
+            ->map(fn ($program) => [
+                'major_id' => $program->major_id,
+                'year_level' => $program->year_level,
+                'semester' => $program->semester,
+            ])
+            ->filter(fn (array $context) => $context['major_id'])
+            ->values()
+            ->all();
+
+        if (empty($contexts) && $class->major_id) {
+            $contexts[] = [
+                'major_id' => $class->major_id,
+                'year_level' => $class->year_level,
+                'semester' => $class->semester,
+            ];
+        }
+
+        return array_values(array_filter(array_map(
+            fn (array $context) => $this->mergeRequestedSubjectContext($context, $filters),
+            $contexts
+        )));
+    }
+
+    private function mergeRequestedSubjectContext(array $context, array $filters): ?array
+    {
+        $requested = [
+            'major_id' => $this->toNullableInt($filters['major_id'] ?? null),
+            'year_level' => $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null),
+            'semester' => $this->toNullableInt($filters['semester'] ?? null),
+        ];
+
+        foreach ($requested as $key => $value) {
+            if (!$value) {
+                continue;
+            }
+
+            if (!empty($context[$key]) && (int) $context[$key] !== $value) {
+                return null;
+            }
+
+            $context[$key] = $value;
+        }
+
+        return $context;
+    }
+
+    private function applyMajorSubjectContext($query, array $context): void
+    {
+        $query
+            ->when($context['major_id'] ?? null, fn ($q, $value) => $q->where('major_id', $value))
+            ->when($context['year_level'] ?? null, fn ($q, $value) => $q->where('year_level', $value))
+            ->when($context['semester'] ?? null, fn ($q, $value) => $q->where('semester', $value));
+    }
+
+    private function resolveClassAttendanceContext(Classes $class, array $filters): array
+    {
+        $majorId = $this->toNullableInt($filters['major_id'] ?? null);
+        $shiftId = $this->toNullableInt($filters['shift_id'] ?? null);
+        $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
+        $semester = $this->toNullableInt($filters['semester'] ?? null);
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null) ?? $class->academic_year;
+
+        $program = $class->programs->first(function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
+            if ($majorId && (int) ($program->major_id ?? 0) !== $majorId) {
+                return false;
+            }
+
+            if ($shiftId && (int) ($program->shift_id ?? 0) !== $shiftId) {
+                return false;
+            }
+
+            if ($yearLevel && (int) ($program->year_level ?? 0) !== $yearLevel) {
+                return false;
+            }
+
+            if ($semester && (int) ($program->semester ?? 0) !== $semester) {
+                return false;
+            }
+
+            return true;
+        });
+
+        $resolvedMajorId = $majorId ?: ($program?->major_id ?: $class->major_id);
+        $resolvedShiftId = $shiftId ?: ($program?->shift_id ?: $class->shift_id);
+        $resolvedYearLevel = $yearLevel ?: ($program?->year_level ?: $class->year_level);
+        $resolvedSemester = $semester ?: ($program?->semester ?: $class->semester);
+
+        return [
+            'major_id' => $resolvedMajorId,
+            'shift_id' => $resolvedShiftId,
+            'academic_year' => $academicYear,
+            'year_level' => $resolvedYearLevel,
+            'semester' => $resolvedSemester,
+            'major' => $this->resolveMajorModel($class, $resolvedMajorId),
+            'shift' => $this->resolveShiftModel($class, $resolvedShiftId),
+        ];
+    }
+
+    private function resolveMajorModel(Classes $class, mixed $majorId): ?Major
+    {
+        $majorId = $this->toNullableInt($majorId);
+
+        if (!$majorId) {
+            return null;
+        }
+
+        if ($class->relationLoaded('major') && (int) ($class->major?->id ?? 0) === $majorId) {
+            return $class->major;
+        }
+
+        $program = $class->programs->first(fn ($item) => (int) ($item->major_id ?? 0) === $majorId);
+
+        return $program?->major ?? Major::find($majorId);
+    }
+
+    private function resolveShiftModel(Classes $class, mixed $shiftId): ?Shift
+    {
+        $shiftId = $this->toNullableInt($shiftId);
+
+        if (!$shiftId) {
+            return null;
+        }
+
+        if ($class->relationLoaded('shift') && (int) ($class->shift?->id ?? 0) === $shiftId) {
+            return $class->shift;
+        }
+
+        $program = $class->programs->first(fn ($item) => (int) ($item->shift_id ?? 0) === $shiftId);
+
+        return $program?->shift ?? Shift::find($shiftId);
     }
 
     private function studentMatchesMatrixFilters(Students $student, array $filters): bool
@@ -903,6 +1195,17 @@ class AttendanceSessionService
         $yearLevel = $filters['year_level'] ?? $filters['stage'] ?? null;
         if (!$this->sameYearLevel($academic?->stage, $yearLevel)) {
             return false;
+        }
+
+        $studentName = $filters['student_name'] ?? $filters['search'] ?? null;
+        if ($studentName) {
+            $nameEn = strtolower($student->full_name_en ?? '');
+            $nameKh = strtolower($student->full_name_kh ?? '');
+            $code = strtolower($student->id_card_number ?? '');
+            $q = strtolower($studentName);
+            if (!str_contains($nameEn, $q) && !str_contains($nameKh, $q) && !str_contains($code, $q)) {
+                return false;
+            }
         }
 
         return true;
@@ -1148,6 +1451,17 @@ class AttendanceSessionService
         $extracted = (int) filter_var((string) $value, FILTER_SANITIZE_NUMBER_INT);
 
         return $extracted > 0 ? $extracted : null;
+    }
+
+    private function toNullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+
+        return $value === '' ? null : $value;
     }
 }
 

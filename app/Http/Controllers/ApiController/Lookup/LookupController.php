@@ -136,6 +136,21 @@ class LookupController extends Controller
         return $this->success($this->service->getScoreFilters());
     }
 
+    public function attendanceFilters()
+    {
+        return $this->success($this->service->getAttendanceFilters());
+    }
+
+    public function attendanceClasses(Request $request)
+    {
+        return $this->success($this->service->getAttendanceClasses($request->query()));
+    }
+
+    public function attendanceSubjects(Request $request)
+    {
+        return $this->success($this->service->getAttendanceSubjects($request->query()));
+    }
+
     public function teachers()
     {
         return $this->success($this->service->getTeachers());

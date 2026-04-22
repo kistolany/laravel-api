@@ -23,6 +23,8 @@ class User extends Authenticatable
         'username',
         'password_hash',
         'role_id',
+        'student_id',
+        'teacher_id',
         'status',
         'full_name',
         'image',
@@ -47,6 +49,8 @@ class User extends Authenticatable
     {
         return [
             'role_id' => 'integer',
+            'student_id' => 'integer',
+            'teacher_id' => 'integer',
             'status' => 'string',
         ];
     }
@@ -54,6 +58,16 @@ class User extends Authenticatable
     public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
+    }
+
+    public function student(): BelongsTo
+    {
+        return $this->belongsTo(Students::class, 'student_id');
+    }
+
+    public function teacher(): BelongsTo
+    {
+        return $this->belongsTo(Teacher::class, 'teacher_id');
     }
 
     public function refreshTokens(): HasMany
