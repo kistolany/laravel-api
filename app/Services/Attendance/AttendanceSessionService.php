@@ -308,15 +308,19 @@ class AttendanceSessionService
                 ]);
             }
 
+            $startDate = $filters['start_date'] ?? $filters['session_date'] ?? now()->toDateString();
+            $endDate = $filters['end_date'] ?? $filters['session_date'] ?? $startDate;
+
             return $this->successResponse(
                 200,
                 'Attendance matrix retrieved successfully.',
                 $this->buildMatrixPayload(
                     $class,
                     $subject,
-                    $this->formatDate($filters['session_date'] ?? now()->toDateString()),
+                    $this->formatDate($startDate),
                     $this->matrixSessionCount($filters['session_count'] ?? null),
-                    $filters
+                    $filters,
+                    $this->formatDate($endDate)
                 )
             );
         });
@@ -814,7 +818,7 @@ class AttendanceSessionService
         ]);
     }
 
-    private function buildMatrixPayload(Classes $class, Subject $subject, string $sessionDate, int $sessionCount, array $filters = []): array
+    private function buildMatrixPayload(Classes $class, Subject $subject, string $sessionDate, int $sessionCount, array $filters = [], ?string $endDate = null): array
     {
         $studentIds = $class->students
             ->pluck('id')
@@ -829,7 +833,11 @@ class AttendanceSessionService
             }])
             ->where('class_id', $class->id)
             ->where('subject_id', $subject->id)
-            ->where('session_date', $sessionDate)
+            ->when($endDate && $endDate !== $sessionDate, function($q) use ($sessionDate, $endDate) {
+                return $q->whereBetween('session_date', [$sessionDate, $endDate]);
+            }, function($q) use ($sessionDate) {
+                return $q->where('session_date', $sessionDate);
+            })
             ->whereBetween('session_number', [1, $sessionCount]);
 
         $this->applySessionContextFilters($sessions, $filters);
@@ -845,10 +853,10 @@ class AttendanceSessionService
             }
         }
 
-        // Fetch all approved leaves for this date for students in this class
+        // Fetch all approved leaves that overlap with this date range
         $approvedLeaves = \App\Models\LeaveRequest::where('requester_type', 'student')
             ->where('status', 'approved')
-            ->where('start_date', '<=', $sessionDate)
+            ->where('start_date', '<=', $endDate ?: $sessionDate)
             ->where('end_date', '>=', $sessionDate)
             ->whereIn('requester_id', $studentIds)
             ->pluck('requester_id')

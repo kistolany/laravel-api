@@ -85,6 +85,7 @@ class TeacherAuthService
                 'username'      => $data['username'],
                 'password_hash' => Hash::make($data['password']),
                 'role_id'       => $roleId,
+                'teacher_id'    => $teacher->id,
                 'status'        => 'Active',
                 'full_name'     => $data['first_name'] . ' ' . $data['last_name'],
                 'phone'         => $data['phone_number'] ?? null,
@@ -121,7 +122,7 @@ class TeacherAuthService
             $teacher->update($data);
 
             if ($user) {
-                $userUpdates = [];
+                $userUpdates = ['teacher_id' => $teacher->id];
                 if (isset($data['username'])) $userUpdates['username'] = $data['username'];
                 if (!empty($data['password'])) $userUpdates['password_hash'] = $data['password'];
                 if (isset($data['first_name']) || isset($data['last_name'])) {

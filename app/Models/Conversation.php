@@ -14,12 +14,20 @@ class Conversation extends Model
         'user_one_id',
         'user_two_id',
         'last_message_at',
+        'user_one_muted',
+        'user_two_muted',
+        'user_one_last_cleared_at',
+        'user_two_last_cleared_at',
     ];
 
     protected function casts(): array
     {
         return [
             'last_message_at' => 'datetime',
+            'user_one_muted' => 'boolean',
+            'user_two_muted' => 'boolean',
+            'user_one_last_cleared_at' => 'datetime',
+            'user_two_last_cleared_at' => 'datetime',
         ];
     }
 

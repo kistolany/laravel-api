@@ -18,6 +18,7 @@ use App\Http\Controllers\ApiController\Role\RoleController;
 use App\Http\Controllers\ApiController\Shift\ShiftController;
 use App\Http\Controllers\ApiController\Student\StudentController;
 use App\Http\Controllers\ApiController\Student\StudentCardController;
+use App\Http\Controllers\ApiController\StudentPaymentController;
 use App\Http\Controllers\ApiController\Scholarship\ScholarshipController;
 use App\Http\Controllers\ApiController\Score\StudentScoreController;
 use App\Http\Controllers\ApiController\Student\StudentRegistrationController;
@@ -121,6 +122,7 @@ Route::prefix('v1')->group(function () {
 
         // Student routes
         Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
+        Route::get('students/final-exam-list', [StudentController::class, 'finalExamList'])->middleware('permission:student.view');
         Route::get('students/pass', [StudentController::class, 'passStudents'])->middleware('permission:student.view');
         Route::get('students/pending', [StudentController::class, 'pendingStudents'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['index', 'show'])->middleware('permission:student.view');
@@ -132,6 +134,14 @@ Route::prefix('v1')->group(function () {
         Route::patch('students/{id}/student-type', [StudentController::class, 'updateStudentType'])->middleware('permission:student.update');
         Route::post('students/{id}/image', [StudentController::class, 'updateImage'])->middleware('permission:student.image.update');
         Route::get('students/{id}/classes', [StudentController::class, 'classes'])->middleware('permission:student.classes.view');
+
+        // Student payment routes
+        Route::get('student-payments/plans', [StudentPaymentController::class, 'plans'])->middleware('permission:student.view');
+        Route::get('student-payments', [StudentPaymentController::class, 'index'])->middleware('permission:student.view');
+        Route::get('student-payments/{id}', [StudentPaymentController::class, 'show'])->whereNumber('id')->middleware('permission:student.view');
+        Route::post('student-payments', [StudentPaymentController::class, 'store'])->middleware('permission:student.create');
+        Route::put('student-payments/{id}', [StudentPaymentController::class, 'update'])->whereNumber('id')->middleware('permission:student.update');
+        Route::delete('student-payments/{id}', [StudentPaymentController::class, 'destroy'])->whereNumber('id')->middleware('permission:student.delete');
 
         // Student Card routes
         Route::get('student-cards', [StudentCardController::class, 'index'])->middleware('permission:student.card.view');
@@ -186,6 +196,9 @@ Route::prefix('v1')->group(function () {
             Route::post('conversations/{id}/messages', [ChatController::class, 'sendMessage'])->whereNumber('id');
             Route::patch('conversations/{id}/read', [ChatController::class, 'markRead'])->whereNumber('id');
             Route::get('unread-count', [ChatController::class, 'unreadCount']);
+            Route::delete('conversations/{id}/clear', [ChatController::class, 'clearConversation'])->whereNumber('id');
+            Route::delete('conversations/{id}', [ChatController::class, 'destroyConversation'])->whereNumber('id');
+            Route::patch('conversations/{id}/mute', [ChatController::class, 'toggleMute'])->whereNumber('id');
             Route::delete('messages/{messageId}', [ChatController::class, 'deleteMessage'])->whereNumber('messageId');
         });
 
@@ -274,6 +287,7 @@ Route::prefix('v1')->group(function () {
     // Subject Classroom routes (Lessons, Homework, Submissions)
     // Accessible by both Teachers and Users (Admins/Students)
     Route::middleware('auth.unified')->prefix('subject-classroom')->group(function () {
+        Route::get('options', [SubjectClassroomController::class, 'options']);
         Route::get('lessons', [SubjectClassroomController::class, 'lessons']);
         Route::post('lessons', [SubjectClassroomController::class, 'storeLesson']);
         Route::delete('lessons/{id}', [SubjectClassroomController::class, 'destroyLesson'])->whereNumber('id');

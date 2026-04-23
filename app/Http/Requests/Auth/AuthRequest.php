@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Models\Role;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -48,6 +49,10 @@ class AuthRequest extends FormRequest
             'status' => 'nullable|in:Active,Inactive',
             'full_name' => 'required|string|max:255',
             'phone' => 'required|string|max:255',
+            'student_id' => 'nullable|integer|exists:students,id',
+            'teacher_id' => 'nullable|integer|exists:teachers,id',
+            'staff_id' => 'nullable|string|max:50',
+            'account_purpose' => 'nullable|string|in:Main Account,Assistant Account,Temporary Account',
             'image' => 'nullable|image|max:2048',
         ];
     }
@@ -69,6 +74,10 @@ class AuthRequest extends FormRequest
             'status' => 'nullable|in:Active,Inactive',
             'full_name' => 'sometimes|required|string|max:255',
             'phone' => 'sometimes|required|string|max:255',
+            'student_id' => 'nullable|integer|exists:students,id',
+            'teacher_id' => 'nullable|integer|exists:teachers,id',
+            'staff_id' => 'nullable|string|max:50',
+            'account_purpose' => 'nullable|string|in:Main Account,Assistant Account,Temporary Account',
             'image' => 'nullable|image|max:2048',
         ];
     }
@@ -118,6 +127,47 @@ class AuthRequest extends FormRequest
         return [
             'refresh_token' => 'required|string',
         ];
+    }
+
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator): void {
+            if (!in_array($this->route()?->getActionMethod(), ['createUser', 'updateUser'], true)) {
+                return;
+            }
+
+            $roleId = $this->input('role_id');
+            if (!$roleId) {
+                return;
+            }
+
+            $roleName = Role::whereKey($roleId)->value('name');
+            $identityType = $this->identityTypeForRole($roleName);
+
+            if ($identityType === 'teacher' && !$this->filled('teacher_id')) {
+                $validator->errors()->add('teacher_id', 'Please link this user to a teacher.');
+            }
+
+            if ($identityType === 'student' && !$this->filled('student_id')) {
+                $validator->errors()->add('student_id', 'Please link this user to a student.');
+            }
+
+            if ($identityType === 'staff' && !$this->filled('staff_id')) {
+                $validator->errors()->add('staff_id', 'Please enter a staff ID for this user.');
+            }
+        });
+    }
+
+    private function identityTypeForRole(?string $roleName): ?string
+    {
+        $normalized = strtolower(preg_replace('/\s+/', '', trim((string) $roleName)));
+
+        return match ($normalized) {
+            'teacher' => 'teacher',
+            'student' => 'student',
+            'staff', 'assistant', 'assistance', 'orderstaff' => 'staff',
+            default => null,
+        };
     }
 }
 

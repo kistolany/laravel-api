@@ -70,6 +70,8 @@ class AuthService
                 'username' => $data['username'],
                 'password_hash' => Hash::make($data['password']),
                 'role_id' => $roleId,
+                ...$this->identityFieldsForRole($roleId, $data),
+                'account_purpose' => $data['account_purpose'] ?? 'Main Account',
                 'status' => $data['status'] ?? 'Active',
                 'full_name' => $data['full_name'] ?? null,
                 'phone' => $data['phone'] ?? null,
@@ -97,6 +99,10 @@ class AuthService
             
             if (isset($data['role_id'])) {
                 $updates['role_id'] = (int) $data['role_id'];
+                $updates = [
+                    ...$updates,
+                    ...$this->identityFieldsForRole((int) $data['role_id'], $data),
+                ];
             }
             
             if (isset($data['status'])) {
@@ -105,6 +111,10 @@ class AuthService
             
             if (isset($data['username'])) {
                 $updates['username'] = $data['username'];
+            }
+
+            if (isset($data['account_purpose'])) {
+                $updates['account_purpose'] = $data['account_purpose'];
             }
             
             // Only update password if a new one is provided
@@ -159,7 +169,7 @@ class AuthService
     public function listUsers(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = User::with('role')->latest();
+            $query = User::with(['role', 'teacher', 'student'])->latest();
             Log::info('Listing users with filters', request()->only(['search', 'role_id', 'status']));
             return $this->paginateResponse($query, UserResource::class);
             
@@ -426,6 +436,30 @@ class AuthService
         }
 
         return $roleId;
+    }
+
+    private function identityFieldsForRole(int $roleId, array $data): array
+    {
+        $roleName = Role::whereKey($roleId)->value('name');
+        $identityType = $this->identityTypeForRole($roleName);
+
+        return [
+            'student_id' => $identityType === 'student' ? ($data['student_id'] ?? null) : null,
+            'teacher_id' => $identityType === 'teacher' ? ($data['teacher_id'] ?? null) : null,
+            'staff_id' => $identityType === 'staff' ? ($data['staff_id'] ?? null) : null,
+        ];
+    }
+
+    private function identityTypeForRole(?string $roleName): ?string
+    {
+        $normalized = strtolower(preg_replace('/\s+/', '', trim((string) $roleName)));
+
+        return match ($normalized) {
+            'teacher' => 'teacher',
+            'student' => 'student',
+            'staff', 'assistant', 'assistance', 'orderstaff' => 'staff',
+            default => null,
+        };
     }
 
     private function findUserById(int $id): User

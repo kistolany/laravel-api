@@ -38,6 +38,14 @@ class StudentController extends Controller
     }
 
     /**
+     * Display PAY/PASS students eligible for the final exam list.
+     */
+    public function finalExamList()
+    {
+        return $this->success($this->service->finalExamList());
+    }
+
+    /**
      * Display only students with student_type PASS.
      */
     public function passStudents()
@@ -122,7 +130,12 @@ class StudentController extends Controller
      */
     public function updateStudentType(StudentTypeRequest $request, $id)
     {
-        $student = $this->service->setStudentType($id, $request->validated('student_type'));
+        $validated = $request->validated();
+        $student = $this->service->setStudentType(
+            $id,
+            $validated['student_type'],
+            $validated['tuition_plan'] ?? null
+        );
         return $this->success(new StudentResource($student), "Student type updated successfully.");
     }
 

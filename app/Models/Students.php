@@ -21,6 +21,8 @@ class Students extends Model
         'image',
         'id_card_number',
         'student_type',
+        'tuition_plan',
+        'tuition_plan_assigned_at',
         'exam_place',
         'bacll_code',
         'grade',
@@ -34,6 +36,7 @@ class Students extends Model
     protected $casts = [
         'short_docs_status' => 'boolean',
         'dob' => 'date',
+        'tuition_plan_assigned_at' => 'datetime',
     ];
 
     public function academicInfo(): HasOne
@@ -67,6 +70,16 @@ class Students extends Model
     public function scores(): HasMany
     {
         return $this->hasMany(StudentScore::class, 'student_id', 'id');
+    }
+
+    public function attendanceRecords(): HasMany
+    {
+        return $this->hasMany(AttendanceRecord::class, 'student_id', 'id');
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(StudentPayment::class, 'student_id', 'id');
     }
 
     public function getBarcodeAttribute(): string

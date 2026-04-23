@@ -3,14 +3,18 @@
 namespace App\Http\Controllers\ApiController\SubjectClassroom;
 
 use App\Http\Controllers\Controller;
-use App\Models\SubjectLesson;
+use App\DTOs\PaginatedResult;
+use App\Enums\ResponseStatus;
+use App\Exceptions\ApiException;
+use App\Models\ClassSchedule;
 use App\Models\HomeworkAssignment;
 use App\Models\HomeworkSubmission;
+use App\Models\SubjectLesson;
+use App\Models\Teacher;
+use App\Models\User;
 use App\Traits\ApiResponseTrait;
-use App\DTOs\PaginatedResult;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class SubjectClassroomController extends Controller
 {
@@ -81,6 +85,77 @@ class SubjectClassroomController extends Controller
         }
     }
 
+    /**
+     * GET /subject-classroom/options
+     *
+     * Returns the class and subject contexts the current account may use.
+     * Class schedules are the source of truth for teacher, subject, major,
+     * year, semester, shift, and academic year.
+     */
+    public function options(Request $request)
+    {
+        $actor = $this->resolveActor($request);
+        $query = $this->scheduleOptionQuery();
+
+        if ($actor['scope'] === 'teacher') {
+            $query->where('class_schedules.teacher_id', $actor['teacher_id']);
+        } elseif ($actor['scope'] === 'student') {
+            $this->applyStudentScheduleScope($query, $actor['student_id']);
+        }
+
+        $schedules = $query
+            ->orderBy('class_schedules.academic_year')
+            ->orderBy('class_schedules.year_level')
+            ->orderBy('class_schedules.semester')
+            ->orderBy('class_schedules.class_id')
+            ->orderBy('class_schedules.subject_id')
+            ->get();
+
+        $classes = $schedules
+            ->groupBy('class_id')
+            ->map(function ($items) {
+                $schedule = $items->first();
+                $class = $schedule->classroom;
+
+                return [
+                    'id' => $schedule->class_id,
+                    'name' => $class?->name ?? "Class {$schedule->class_id}",
+                    'major_id' => $class?->major_id,
+                    'major_name' => $class?->major?->name,
+                    'shift_id' => $class?->shift_id ?? $schedule->shift_id,
+                    'shift_name' => $class?->shift?->name ?? $schedule->shift?->name,
+                    'academic_year' => $class?->academic_year ?? $schedule->academic_year,
+                    'year_level' => $class?->year_level ?? $schedule->year_level,
+                    'semester' => $class?->semester ?? $schedule->semester,
+                    'subjects' => $items
+                        ->unique('subject_id')
+                        ->map(fn (ClassSchedule $item) => $this->scheduleSubjectOption($item))
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return $this->success([
+            'scope' => $actor['scope'],
+            'can_manage' => $actor['can_manage'],
+            'can_submit' => $actor['can_submit'],
+            'teacher_id' => $actor['teacher_id'],
+            'student_id' => $actor['student_id'],
+            'classes' => $classes,
+            'subjects' => $schedules
+                ->unique('subject_id')
+                ->map(fn (ClassSchedule $schedule) => $this->scheduleSubjectOption($schedule))
+                ->values()
+                ->all(),
+            'schedules' => $schedules
+                ->map(fn (ClassSchedule $schedule) => $this->scheduleOption($schedule))
+                ->values()
+                ->all(),
+        ], 'Subject classroom options retrieved successfully.');
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  LESSONS
     // ═══════════════════════════════════════════════════════════════════════
@@ -91,7 +166,16 @@ class SubjectClassroomController extends Controller
      */
     public function lessons(Request $request)
     {
-        $query = SubjectLesson::with(['teacher:id,first_name,last_name', 'subject:id,name', 'classroom:id,name']);
+        $actor = $this->resolveActor($request);
+        $query = SubjectLesson::with([
+            'teacher:id,first_name,last_name',
+            'subject:id,name',
+            'classroom:id,name,major_id,shift_id,academic_year,year_level,semester',
+            'classroom.major:id,name',
+            'classroom.shift:id,name',
+        ]);
+
+        $this->applyVisibleContentScope($query, $actor, 'subject_lessons');
 
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->class_id);
@@ -128,18 +212,14 @@ class SubjectClassroomController extends Controller
             'file'        => 'required|file|max:10240', // 10 MB
         ]);
 
-        // Resolve teacher_id from authenticated user
-        $teacherId = $this->resolveTeacherId($request);
-        if (!$teacherId) {
-            return $this->error('Could not resolve teacher identity.', \App\Enums\ResponseStatus::FORBIDDEN);
-        }
+        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id);
 
         $uploaded = $this->uploadFile($request, 'file', 'lessons');
 
         $lesson = SubjectLesson::create([
             'class_id'    => $request->class_id,
             'subject_id'  => $request->subject_id,
-            'teacher_id'  => $teacherId,
+            'teacher_id'  => $schedule->teacher_id,
             'title'       => $request->title,
             'description' => $request->description,
             'file_url'    => $uploaded['url'],
@@ -149,7 +229,7 @@ class SubjectClassroomController extends Controller
             'lesson_date' => $request->lesson_date,
         ]);
 
-        $lesson->load(['teacher:id,first_name,last_name', 'subject:id,name']);
+        $lesson->load(['teacher:id,first_name,last_name', 'subject:id,name', 'classroom:id,name']);
 
         return $this->success($lesson, 'Lesson uploaded successfully.');
     }
@@ -160,6 +240,7 @@ class SubjectClassroomController extends Controller
     public function destroyLesson($id)
     {
         $lesson = SubjectLesson::findOrFail($id);
+        $this->guardCanManageClassSubject(request(), $lesson->class_id, $lesson->subject_id);
         $lesson->delete();
 
         return $this->success(null, 'Lesson deleted successfully.');
@@ -175,8 +256,17 @@ class SubjectClassroomController extends Controller
      */
     public function homework(Request $request)
     {
-        $query = HomeworkAssignment::with(['teacher:id,first_name,last_name', 'subject:id,name', 'classroom:id,name'])
+        $actor = $this->resolveActor($request);
+        $query = HomeworkAssignment::with([
+                'teacher:id,first_name,last_name',
+                'subject:id,name',
+                'classroom:id,name,major_id,shift_id,academic_year,year_level,semester',
+                'classroom.major:id,name',
+                'classroom.shift:id,name',
+            ])
             ->withCount('submissions');
+
+        $this->applyVisibleContentScope($query, $actor, 'homework_assignments');
 
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->class_id);
@@ -223,15 +313,12 @@ class SubjectClassroomController extends Controller
             'attachment'  => 'nullable|file|max:10240',
         ]);
 
-        $teacherId = $this->resolveTeacherId($request);
-        if (!$teacherId) {
-            return $this->error('Could not resolve teacher identity.', \App\Enums\ResponseStatus::FORBIDDEN);
-        }
+        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id);
 
         $data = [
             'class_id'    => $request->class_id,
             'subject_id'  => $request->subject_id,
-            'teacher_id'  => $teacherId,
+            'teacher_id'  => $schedule->teacher_id,
             'title'       => $request->title,
             'description' => $request->description,
             'due_date'    => $request->due_date,
@@ -246,7 +333,7 @@ class SubjectClassroomController extends Controller
         }
 
         $homework = HomeworkAssignment::create($data);
-        $homework->load(['teacher:id,first_name,last_name', 'subject:id,name']);
+        $homework->load(['teacher:id,first_name,last_name', 'subject:id,name', 'classroom:id,name']);
 
         return $this->success($homework, 'Homework assignment created successfully.');
     }
@@ -257,6 +344,7 @@ class SubjectClassroomController extends Controller
     public function updateHomework(Request $request, $id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $this->guardCanManageClassSubject($request, $homework->class_id, $homework->subject_id);
 
         $request->validate([
             'title'       => 'sometimes|string|max:255',
@@ -287,6 +375,7 @@ class SubjectClassroomController extends Controller
     public function destroyHomework($id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
         $homework->delete();
 
         return $this->success(null, 'Homework assignment deleted successfully.');
@@ -302,6 +391,8 @@ class SubjectClassroomController extends Controller
     public function submissions($id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
+
         $subs = $homework->submissions()
             ->with('student:id,full_name_en,full_name_kh,id_card_number')
             ->latest('submitted_at')
@@ -331,6 +422,8 @@ class SubjectClassroomController extends Controller
         if (!$studentId) {
             return $this->error('Could not resolve student identity.', \App\Enums\ResponseStatus::FORBIDDEN);
         }
+
+        $this->guardStudentCanAccessHomework($studentId, $homework);
 
         // Check if already submitted (allow re-submission / update)
         $existing = HomeworkSubmission::where('homework_id', $id)
@@ -371,6 +464,8 @@ class SubjectClassroomController extends Controller
     public function gradeSubmission(Request $request, $id)
     {
         $submission = HomeworkSubmission::findOrFail($id);
+        $submission->loadMissing('assignment');
+        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id);
 
         $request->validate([
             'score'    => 'required|numeric|min:0',
@@ -389,6 +484,242 @@ class SubjectClassroomController extends Controller
 
     // ─── Identity Resolvers ───────────────────────────────────────────────
 
+    private function resolveActor(Request $request): array
+    {
+        $user = $request->user();
+
+        if ($user instanceof Teacher) {
+            return [
+                'scope' => 'teacher',
+                'teacher_id' => $user->id,
+                'student_id' => null,
+                'can_manage' => true,
+                'can_submit' => false,
+            ];
+        }
+
+        if ($user instanceof User) {
+            $role = strtolower((string) $user->role?->name);
+            $isPrivileged = in_array($role, ['admin', 'staff', 'assistant', 'orderstaff'], true);
+
+            if ($isPrivileged) {
+                return [
+                    'scope' => 'all',
+                    'teacher_id' => null,
+                    'student_id' => null,
+                    'can_manage' => true,
+                    'can_submit' => false,
+                ];
+            }
+
+            if ($user->teacher_id) {
+                return [
+                    'scope' => 'teacher',
+                    'teacher_id' => (int) $user->teacher_id,
+                    'student_id' => null,
+                    'can_manage' => true,
+                    'can_submit' => false,
+                ];
+            }
+
+            if ($user->student_id) {
+                return [
+                    'scope' => 'student',
+                    'teacher_id' => null,
+                    'student_id' => (int) $user->student_id,
+                    'can_manage' => false,
+                    'can_submit' => true,
+                ];
+            }
+        }
+
+        return [
+            'scope' => 'none',
+            'teacher_id' => null,
+            'student_id' => null,
+            'can_manage' => false,
+            'can_submit' => false,
+        ];
+    }
+
+    private function scheduleOptionQuery()
+    {
+        return ClassSchedule::query()
+            ->select([
+                'class_schedules.id',
+                'class_schedules.class_id',
+                'class_schedules.subject_id',
+                'class_schedules.teacher_id',
+                'class_schedules.shift_id',
+                'class_schedules.day_of_week',
+                'class_schedules.academic_year',
+                'class_schedules.year_level',
+                'class_schedules.semester',
+                'class_schedules.room',
+            ])
+            ->with([
+                'classroom:id,name,major_id,shift_id,academic_year,year_level,semester,section',
+                'classroom.major:id,name',
+                'classroom.shift:id,name',
+                'subject:id,name,subject_Code',
+                'teacher:id,first_name,last_name',
+                'shift:id,name',
+            ]);
+    }
+
+    private function scheduleOption(ClassSchedule $schedule): array
+    {
+        $class = $schedule->classroom;
+
+        return [
+            'id' => $schedule->id,
+            'class_id' => $schedule->class_id,
+            'class_name' => $class?->name ?? "Class {$schedule->class_id}",
+            'subject_id' => $schedule->subject_id,
+            'subject_name' => $schedule->subject?->name,
+            'teacher_id' => $schedule->teacher_id,
+            'teacher_name' => $schedule->teacher ? trim($schedule->teacher->first_name . ' ' . $schedule->teacher->last_name) : null,
+            'major_id' => $class?->major_id,
+            'major_name' => $class?->major?->name,
+            'shift_id' => $class?->shift_id ?? $schedule->shift_id,
+            'shift_name' => $class?->shift?->name ?? $schedule->shift?->name,
+            'academic_year' => $class?->academic_year ?? $schedule->academic_year,
+            'year_level' => $class?->year_level ?? $schedule->year_level,
+            'semester' => $class?->semester ?? $schedule->semester,
+            'day_of_week' => $schedule->day_of_week,
+            'room' => $schedule->room,
+        ];
+    }
+
+    private function scheduleSubjectOption(ClassSchedule $schedule): array
+    {
+        $class = $schedule->classroom;
+
+        return [
+            'id' => $schedule->subject_id,
+            'name' => $schedule->subject?->name,
+            'subject_code' => $schedule->subject?->subject_Code,
+            'class_id' => $schedule->class_id,
+            'schedule_id' => $schedule->id,
+            'teacher_id' => $schedule->teacher_id,
+            'major_id' => $class?->major_id,
+            'major_name' => $class?->major?->name,
+            'academic_year' => $class?->academic_year ?? $schedule->academic_year,
+            'year_level' => $class?->year_level ?? $schedule->year_level,
+            'semester' => $class?->semester ?? $schedule->semester,
+        ];
+    }
+
+    private function applyStudentScheduleScope($query, int $studentId): void
+    {
+        $query->whereExists(function ($classStudent) use ($studentId) {
+            $classStudent
+                ->selectRaw('1')
+                ->from('class_students')
+                ->whereColumn('class_students.class_id', 'class_schedules.class_id')
+                ->where('class_students.student_id', $studentId)
+                ->where('class_students.status', 'Active');
+        });
+    }
+
+    private function applyVisibleContentScope($query, array $actor, string $table): void
+    {
+        if ($actor['scope'] === 'all') {
+            return;
+        }
+
+        if ($actor['scope'] === 'teacher') {
+            $query->whereExists(function ($schedule) use ($actor, $table) {
+                $schedule
+                    ->selectRaw('1')
+                    ->from('class_schedules')
+                    ->whereColumn('class_schedules.class_id', "{$table}.class_id")
+                    ->whereColumn('class_schedules.subject_id', "{$table}.subject_id")
+                    ->where('class_schedules.teacher_id', $actor['teacher_id']);
+            });
+
+            return;
+        }
+
+        if ($actor['scope'] === 'student') {
+            $query->whereExists(function ($classStudent) use ($actor, $table) {
+                $classStudent
+                    ->selectRaw('1')
+                    ->from('class_students')
+                    ->whereColumn('class_students.class_id', "{$table}.class_id")
+                    ->where('class_students.student_id', $actor['student_id'])
+                    ->where('class_students.status', 'Active');
+            });
+
+            return;
+        }
+
+        $query->whereRaw('1 = 0');
+    }
+
+    private function resolveWritableSchedule(Request $request, int $classId, int $subjectId): ClassSchedule
+    {
+        $actor = $this->resolveActor($request);
+
+        if (!$actor['can_manage']) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, 'Only assigned teachers or staff can manage subject classroom materials.');
+        }
+
+        $query = $this->scheduleOptionQuery()
+            ->where('class_schedules.class_id', $classId)
+            ->where('class_schedules.subject_id', $subjectId);
+
+        if ($actor['scope'] === 'teacher') {
+            $query->where('class_schedules.teacher_id', $actor['teacher_id']);
+        } elseif ($request->filled('teacher_id')) {
+            $query->where('class_schedules.teacher_id', (int) $request->teacher_id);
+        }
+
+        $schedule = $query->first();
+
+        if (!$schedule) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, 'This class and subject are not assigned to this teacher schedule.');
+        }
+
+        return $schedule;
+    }
+
+    private function guardCanManageClassSubject(Request $request, int $classId, int $subjectId): void
+    {
+        $actor = $this->resolveActor($request);
+
+        if (!$actor['can_manage']) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, 'Only assigned teachers or staff can manage this material.');
+        }
+
+        if ($actor['scope'] !== 'teacher') {
+            return;
+        }
+
+        $allowed = ClassSchedule::query()
+            ->where('teacher_id', $actor['teacher_id'])
+            ->where('class_id', $classId)
+            ->where('subject_id', $subjectId)
+            ->exists();
+
+        if (!$allowed) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, 'This material is outside your assigned teaching schedule.');
+        }
+    }
+
+    private function guardStudentCanAccessHomework(int $studentId, HomeworkAssignment $homework): void
+    {
+        $allowed = \App\Models\ClassStudent::query()
+            ->where('student_id', $studentId)
+            ->where('class_id', $homework->class_id)
+            ->where('status', 'Active')
+            ->exists();
+
+        if (!$allowed) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, 'This homework is outside this student class.');
+        }
+    }
+
     private function resolveTeacherId(Request $request): ?int
     {
         // Use $request->user() as it is set by the UnifiedJwtMiddleware
@@ -399,52 +730,20 @@ class SubjectClassroomController extends Controller
         }
 
         // 1. Directly logged in as Teacher model (teacher guard)
-        if ($user instanceof \App\Models\Teacher) {
+        if ($user instanceof Teacher) {
             return $user->id;
         }
 
         // 2. Logged in as User model (api guard)
-        if ($user instanceof \App\Models\User) {
+        if ($user instanceof User) {
             // A. Direct teacher_id linkage on User record (e.g. Teacher using User account)
             if ($user->teacher_id) {
                 return $user->teacher_id;
             }
 
-            // B. Explicitly provided teacher_id in request (e.g. from Admin panel)
-            if ($request->filled('teacher_id')) {
+            // B. Explicitly provided teacher_id in request from a privileged staff account.
+            if ($request->filled('teacher_id') && $this->resolveActor($request)['scope'] === 'all') {
                 return (int) $request->teacher_id;
-            }
-
-            // C. Automatic fallback to the teacher assigned to this subject in this class
-            $classId = $request->class_id ?? $request->input('class_id');
-            $subjectId = $request->subject_id ?? $request->input('subject_id');
-
-            if ($classId && $subjectId) {
-                $schedule = \App\Models\ClassSchedule::where('class_id', $classId)
-                    ->where('subject_id', $subjectId)
-                    ->first();
-                
-                if ($schedule && $schedule->teacher_id) {
-                    return $schedule->teacher_id;
-                }
-
-                // D. Broader fallback: Any teacher assigned to this subject in ANY class
-                $anySchedule = \App\Models\ClassSchedule::where('subject_id', $subjectId)
-                    ->whereNotNull('teacher_id')
-                    ->first();
-                
-                if ($anySchedule) {
-                    return $anySchedule->teacher_id;
-                }
-
-                // E. Emergency fallback for Admin/Staff: First available teacher in the system
-                // This ensures that Admins can always upload even if no schedule exists yet.
-                $firstTeacher = \App\Models\Teacher::where('is_verified', true)->first() 
-                             ?? \App\Models\Teacher::first();
-                
-                if ($firstTeacher) {
-                    return $firstTeacher->id;
-                }
             }
         }
 

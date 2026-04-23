@@ -21,12 +21,25 @@ class LeaveRequestController extends Controller
     {
         $user = auth()->user();
         $query = LeaveRequest::query()
-            ->leftJoin('academic_info', function ($join) {
-                $join->on('leave_requests.requester_id', '=', 'academic_info.student_id')
+            ->leftJoin('academic_info as requester_academic_info', function ($join) {
+                $join->on('leave_requests.requester_id', '=', 'requester_academic_info.student_id')
                     ->where('leave_requests.requester_type', '=', 'student');
             })
-            ->leftJoin('majors', 'academic_info.major_id', '=', 'majors.id')
-            ->select('leave_requests.*', 'majors.name as major_name', 'academic_info.stage as year');
+            ->leftJoin('majors as student_majors', 'requester_academic_info.major_id', '=', 'student_majors.id')
+            ->leftJoin('teachers as requester_teachers', function ($join) {
+                $join->on('leave_requests.requester_id', '=', 'requester_teachers.id')
+                    ->where('leave_requests.requester_type', '=', 'teacher');
+            })
+            ->leftJoin('majors as teacher_majors', 'requester_teachers.major_id', '=', 'teacher_majors.id')
+            ->leftJoin('subjects as teacher_subjects', 'requester_teachers.subject_id', '=', 'teacher_subjects.id')
+            ->select('leave_requests.*')
+            ->selectRaw('COALESCE(student_majors.name, teacher_majors.name) as major_name')
+            ->selectRaw('requester_academic_info.stage as year')
+            ->selectRaw('requester_academic_info.batch_year as batch_year')
+            ->selectRaw('teacher_subjects.name as subject_name')
+            ->selectRaw('requester_teachers.position as position')
+            ->selectRaw('requester_teachers.role as teacher_role')
+            ->selectRaw('requester_teachers.teacher_id as teacher_code');
 
         // 1. Apply Automatic Restrictions based on Role
         if ($user instanceof \App\Models\Teacher) {
@@ -48,8 +61,12 @@ class LeaveRequestController extends Controller
                 }
             } elseif ($user->hasRole('Teacher')) {
                 // Teachers logged in via User account
-                if ($user->teacher_id) {
-                    $query->where('requester_type', 'teacher')->where('requester_id', $user->teacher_id);
+                $teacher = $this->resolveTeacherForUser($user);
+
+                if ($teacher) {
+                    $query->where('requester_type', 'teacher')->where('requester_id', $teacher->id);
+                } else {
+                    $query->whereRaw('1 = 0');
                 }
             }
         }
@@ -88,7 +105,7 @@ class LeaveRequestController extends Controller
         }
 
         $perPage = $request->input('per_page', 10);
-        $paginated = $query->latest()->paginate($perPage);
+        $paginated = $query->orderByDesc('leave_requests.created_at')->paginate($perPage);
         
         return $this->success(
             \App\DTOs\PaginatedResult::fromPaginator($paginated), 
@@ -121,6 +138,18 @@ class LeaveRequestController extends Controller
                     'requester_id' => $student->id,
                     'requester_name' => $student->full_name_en,
                     'requester_name_kh' => $student->full_name_kh
+                ]);
+            }
+        } elseif ($user instanceof \App\Models\User && $user->hasRole('Teacher')) {
+            // Teachers logged in through the standard User account.
+            $teacher = $this->resolveTeacherForUser($user);
+
+            if ($teacher) {
+                $request->merge([
+                    'requester_type' => 'teacher',
+                    'requester_id' => $teacher->id,
+                    'requester_name' => $teacher->full_name,
+                    'requester_name_kh' => $request->input('requester_name_kh', ''),
                 ]);
             }
         }
@@ -221,5 +250,53 @@ class LeaveRequestController extends Controller
                 );
             }
         }
+    }
+
+    private function resolveTeacherForUser(\App\Models\User $user): ?\App\Models\Teacher
+    {
+        if ($user->teacher_id) {
+            return \App\Models\Teacher::find($user->teacher_id);
+        }
+
+        $username = trim((string) $user->username);
+        if ($username !== '') {
+            $teacher = \App\Models\Teacher::where('username', $username)
+                ->orWhere('email', $username)
+                ->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        $phone = trim((string) $user->phone);
+        if ($phone !== '') {
+            $teacher = \App\Models\Teacher::where('phone_number', $phone)->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        $fullName = strtolower(preg_replace('/\s+/', ' ', trim((string) $user->full_name)));
+        if ($fullName !== '') {
+            $teacher = \App\Models\Teacher::whereRaw(
+                "LOWER(TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')))) = ?",
+                [$fullName]
+            )->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        return null;
+    }
+
+    private function linkTeacherToUser(\App\Models\User $user, \App\Models\Teacher $teacher): \App\Models\Teacher
+    {
+        $user->forceFill(['teacher_id' => $teacher->id])->save();
+
+        return $teacher;
     }
 }

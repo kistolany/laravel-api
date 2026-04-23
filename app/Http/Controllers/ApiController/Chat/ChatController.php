@@ -93,12 +93,26 @@ class ChatController extends Controller
         $authId = $request->user()->id;
 
         $conversations = Conversation::forUser($authId)
-            ->with(['userOne:id,username,full_name,image,status', 'userTwo:id,username,full_name,image,status', 'latestMessage'])
+            ->with(['userOne:id,username,full_name,image,status', 'userTwo:id,username,full_name,image,status'])
             ->orderByDesc('last_message_at')
             ->get()
             ->map(function (Conversation $conv) use ($authId) {
                 $otherUser = $conv->user_one_id === $authId ? $conv->userTwo : $conv->userOne;
-                $unreadCount = $conv->messages()->unreadFor($authId)->count();
+                
+                $isUserOne = ($conv->user_one_id === $authId);
+                $lastCleared = $isUserOne ? $conv->user_one_last_cleared_at : $conv->user_two_last_cleared_at;
+
+                $msgQuery = $conv->messages()->unreadFor($authId);
+                if ($lastCleared) {
+                    $msgQuery->where('created_at', '>', $lastCleared);
+                }
+                $unreadCount = $msgQuery->count();
+
+                $latestMsgQuery = $conv->messages()->orderByDesc('created_at');
+                if ($lastCleared) {
+                    $latestMsgQuery->where('created_at', '>', $lastCleared);
+                }
+                $latestMsg = $latestMsgQuery->first();
 
                 return [
                     'id'             => $conv->id,
@@ -109,13 +123,14 @@ class ChatController extends Controller
                         'image'     => $otherUser->image ?? '',
                         'status'    => $otherUser->status ?? 'Active',
                     ] : null,
-                    'last_message'   => $conv->latestMessage ? [
-                        'id'         => $conv->latestMessage->id,
-                        'body'       => $conv->latestMessage->body,
-                        'sender_id'  => $conv->latestMessage->sender_id,
-                        'created_at' => $conv->latestMessage->created_at?->toIso8601String(),
+                    'last_message'   => $latestMsg ? [
+                        'id'         => $latestMsg->id,
+                        'body'       => $latestMsg->body,
+                        'sender_id'  => $latestMsg->sender_id,
+                        'created_at' => $latestMsg->created_at?->toIso8601String(),
                     ] : null,
                     'unread_count'   => $unreadCount,
+                    'is_muted'       => ($conv->user_one_id === $authId) ? (bool)$conv->user_one_muted : (bool)$conv->user_two_muted,
                     'last_message_at' => $conv->last_message_at?->toIso8601String(),
                     'created_at'     => $conv->created_at?->toIso8601String(),
                 ];
@@ -165,6 +180,7 @@ class ChatController extends Controller
                 'image'     => $otherUser->image ?? '',
                 'status'    => $otherUser->status ?? 'Active',
             ] : null,
+            'is_muted'   => ($conversation->user_one_id === $authId) ? (bool)$conversation->user_one_muted : (bool)$conversation->user_two_muted,
             'created_at' => $conversation->created_at?->toIso8601String(),
         ], 'Conversation ready.');
     }
@@ -184,12 +200,20 @@ class ChatController extends Controller
             return $this->error('Conversation not found.', 404);
         }
 
+        $isUserOne = ($conversation->user_one_id === $authId);
+        $lastCleared = $isUserOne ? $conversation->user_one_last_cleared_at : $conversation->user_two_last_cleared_at;
+
         $perPage = min((int) $request->query('per_page', 50), 100);
 
-        $messages = $conversation->messages()
+        $query = $conversation->messages()
             ->with('sender:id,username,full_name,image')
-            ->orderByDesc('created_at')
-            ->paginate($perPage);
+            ->orderByDesc('created_at');
+
+        if ($lastCleared) {
+            $query->where('created_at', '>', $lastCleared);
+        }
+
+        $messages = $query->paginate($perPage);
 
         $items = collect($messages->items())->map(fn (Message $msg) => [
             'id'         => $msg->id,
@@ -316,12 +340,70 @@ class ChatController extends Controller
             return $this->error('Message not found.', 404);
         }
 
-        if ($message->sender_id !== $authId) {
+        if ($message->sender_id !== $authId && !$request->user()->hasRole('Admin')) {
             return $this->error('Unauthorized to delete this message.', 403);
         }
 
         $message->delete();
 
         return $this->success(null, 'Message deleted successfully.');
+    }
+
+    public function clearConversation(Request $request, int $id): JsonResponse
+    {
+        $authId = $request->user()->id;
+        $conversation = Conversation::find($id);
+
+        if (!$conversation || !$conversation->hasParticipant($authId)) {
+            return $this->error('Conversation not found.', 404);
+        }
+
+        $isUserOne = ($conversation->user_one_id === $authId);
+        $field = $isUserOne ? 'user_one_last_cleared_at' : 'user_two_last_cleared_at';
+        
+        $conversation->$field = now();
+        $conversation->save();
+
+        return $this->success(null, 'Conversation cleared for you.');
+    }
+
+    /**
+     * Delete a conversation entirely.
+     */
+    public function destroyConversation(Request $request, int $id): JsonResponse
+    {
+        $authId = $request->user()->id;
+        $conversation = Conversation::find($id);
+
+        if (!$conversation || !$conversation->hasParticipant($authId)) {
+            return $this->error('Conversation not found.', 404);
+        }
+
+        $conversation->delete();
+
+        return $this->success(null, 'Conversation deleted.');
+    }
+
+    /**
+     * Toggle mute status for the current user in a conversation.
+     */
+    public function toggleMute(Request $request, int $id): JsonResponse
+    {
+        $authId = $request->user()->id;
+        $conversation = Conversation::find($id);
+
+        if (!$conversation || !$conversation->hasParticipant($authId)) {
+            return $this->error('Conversation not found.', 404);
+        }
+
+        $isUserOne = ($conversation->user_one_id === $authId);
+        $field = $isUserOne ? 'user_one_muted' : 'user_two_muted';
+        
+        $conversation->$field = !$conversation->$field;
+        $conversation->save();
+
+        return $this->success([
+            'is_muted' => (bool)$conversation->$field
+        ], 'Mute status toggled.');
     }
 }

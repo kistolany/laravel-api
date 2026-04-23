@@ -9,6 +9,13 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 class StudentResource extends JsonResource
 {
+    private const TUITION_PLAN_LABELS = [
+        'PAY_FULL' => 'Pay Full',
+        'SCHOLARSHIP_FULL' => 'Scholarship Full',
+        'SCHOLARSHIP_70' => 'Scholarship 70%',
+        'SCHOLARSHIP_50' => 'Scholarship 50%',
+        'SCHOLARSHIP_30' => 'Scholarship 30%',
+    ];
 
     public function toArray($request): array
     {
@@ -23,6 +30,9 @@ class StudentResource extends JsonResource
             'email' => $this->email,
             'id_card_number'    => $this->id_card_number,
             'student_type'      => $this->student_type,
+            'tuition_plan'      => $this->tuition_plan,
+            'tuition_plan_label' => self::TUITION_PLAN_LABELS[$this->tuition_plan] ?? null,
+            'tuition_plan_assigned_at' => $this->tuition_plan_assigned_at?->format('Y-m-d H:i:s'),
             'exam_place'        => $this->exam_place,
             'bacll_code'        => $this->bacll_code,
             'grade'             => $this->grade,

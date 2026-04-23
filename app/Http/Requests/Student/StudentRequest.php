@@ -31,6 +31,11 @@ class StudentRequest extends FormRequest
             'other_notes'       => 'nullable|string',
             'status'            => 'sometimes|in:enable,disable',
             'student_type'      => 'required|in:PAY,PENDING,PASS,FAIL',
+            'tuition_plan'      => [
+                'nullable',
+                'string',
+                Rule::in(['PAY_FULL', 'SCHOLARSHIP_FULL', 'SCHOLARSHIP_70', 'SCHOLARSHIP_50', 'SCHOLARSHIP_30']),
+            ],
             'exam_place'        => 'nullable|string|max:255',
             'bacll_code'        => 'nullable|string|max:255',
             'grade'             => 'required|string|max:50',

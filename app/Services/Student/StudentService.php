@@ -19,6 +19,21 @@ use Illuminate\Validation\Rule;
 
 class StudentService extends BaseService
 {
+    private const FINAL_EXAM_ABSENCE_LIMIT = 10;
+    private const TUITION_PLANS = [
+        'PAY_FULL',
+        'SCHOLARSHIP_FULL',
+        'SCHOLARSHIP_70',
+        'SCHOLARSHIP_50',
+        'SCHOLARSHIP_30',
+    ];
+    private const SCHOLARSHIP_TUITION_PLANS = [
+        'SCHOLARSHIP_FULL',
+        'SCHOLARSHIP_70',
+        'SCHOLARSHIP_50',
+        'SCHOLARSHIP_30',
+    ];
+
     /**
      * Get all students with their academic information
      */
@@ -113,6 +128,16 @@ class StudentService extends BaseService
     }
 
     /**
+     * Get PAY or PASS students eligible for the final exam list.
+     * Students with 10 or more absences for the selected class/term context
+     * are excluded from this roster.
+     */
+    public function finalExamList(): PaginatedResult
+    {
+        return $this->studentsByTypes(['PAY', 'PASS'], __FUNCTION__, excludeOverAbsentLimit: true);
+    }
+
+    /**
      * Get only PASS students with pagination.
      * Optional query params match payOrPass():
      *   major_id, shift_id, faculty_id, stage, batch_year, study_days,
@@ -123,9 +148,9 @@ class StudentService extends BaseService
         return $this->studentsByTypes(['PASS'], __FUNCTION__);
     }
 
-    private function studentsByTypes(array $studentTypes, string $traceName): PaginatedResult
+    private function studentsByTypes(array $studentTypes, string $traceName, bool $excludeOverAbsentLimit = false): PaginatedResult
     {
-        return $this->trace($traceName, function () use ($studentTypes): PaginatedResult {
+        return $this->trace($traceName, function () use ($studentTypes, $excludeOverAbsentLimit): PaginatedResult {
             $query = Students::with([
                 'academicInfo.major.faculty',
                 'academicInfo.shift',
@@ -139,6 +164,10 @@ class StudentService extends BaseService
               ->where('status', 'active');
 
             $this->applyStudentListFilters($query);
+
+            if ($excludeOverAbsentLimit) {
+                $this->excludeStudentsWithTooManyAbsences($query);
+            }
 
             return $this->paginateResponse($query->latest(), StudentResource::class);
         });
@@ -203,6 +232,66 @@ class StudentService extends BaseService
         });
     }
 
+    private function excludeStudentsWithTooManyAbsences(Builder $query): void
+    {
+        $query->whereHas('attendanceRecords', function (Builder $attendanceQuery) {
+            $attendanceQuery->whereIn('status', $this->absentStatuses());
+
+            if ($this->hasAttendanceContextFilters()) {
+                $attendanceQuery->whereHas('session', function (Builder $sessionQuery) {
+                    $this->applyAttendanceContextFilters($sessionQuery);
+                });
+            }
+        }, '<', self::FINAL_EXAM_ABSENCE_LIMIT);
+    }
+
+    private function absentStatuses(): array
+    {
+        return ['Absent', 'absent', 'A', 'a'];
+    }
+
+    private function hasAttendanceContextFilters(): bool
+    {
+        return request()->filled('class_id')
+            || request()->filled('major_id')
+            || request()->filled('shift_id')
+            || request()->filled('academic_year')
+            || request()->filled('stage')
+            || request()->filled('year_level')
+            || request()->filled('semester');
+    }
+
+    private function applyAttendanceContextFilters(Builder $query): void
+    {
+        if (request('class_id') && request('class_id') !== 'none') {
+            $query->where('class_id', request('class_id'));
+        }
+
+        $query->when(request('major_id'), fn (Builder $q, $majorId) => $q->where('major_id', $majorId));
+        $query->when(request('shift_id'), fn (Builder $q, $shiftId) => $q->where('shift_id', $shiftId));
+        $query->when(request('academic_year'), fn (Builder $q, $academicYear) => $q->where('academic_year', $academicYear));
+        $query->when(request('semester'), fn (Builder $q, $semester) => $q->where('semester', $semester));
+
+        $yearLevel = $this->attendanceYearLevel(request('year_level', request('stage')));
+        if ($yearLevel) {
+            $query->where('year_level', $yearLevel);
+        }
+    }
+
+    private function attendanceYearLevel(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        preg_match('/\d+/', (string) $value, $matches);
+        return isset($matches[0]) ? (int) $matches[0] : null;
+    }
+
     /**
      * Find a specific student by ID
      */
@@ -236,6 +325,7 @@ class StudentService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($data): Students {
             $validatedData = $this->validateExisting($data);
+            $validatedData = $this->normalizeTuitionPlan($validatedData);
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
             unset($validatedData['addresses'], $validatedData['parent_guardian']);
@@ -281,6 +371,7 @@ class StudentService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($id, $data): Students {
             $student = $this->findById($id);
             $validatedData = $this->validateExisting($data, $student->id);
+            $validatedData = $this->normalizeTuitionPlan($validatedData, $student);
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
             unset($validatedData['addresses'], $validatedData['parent_guardian']);
@@ -340,6 +431,32 @@ class StudentService extends BaseService
         });
     }
 
+    private function normalizeTuitionPlan(array $data, ?Students $student = null): array
+    {
+        $type = strtoupper((string) ($data['student_type'] ?? $student?->student_type ?? ''));
+        $incomingPlan = $data['tuition_plan'] ?? null;
+        $existingPlan = $student?->tuition_plan;
+        $plan = $incomingPlan ?: $existingPlan;
+
+        if ($type === 'PAY') {
+            $plan = 'PAY_FULL';
+        } elseif ($type === 'PASS') {
+            $plan = in_array($plan, self::SCHOLARSHIP_TUITION_PLANS, true) ? $plan : null;
+        } else {
+            $plan = null;
+        }
+
+        $data['tuition_plan'] = $plan;
+
+        if ($plan === null) {
+            $data['tuition_plan_assigned_at'] = null;
+        } elseif ($plan !== $existingPlan) {
+            $data['tuition_plan_assigned_at'] = now();
+        }
+
+        return $data;
+    }
+
     /**
      * Validation logic for both tables
      */
@@ -367,6 +484,7 @@ class StudentService extends BaseService
             'image'          => 'nullable|string',
             'status'            => 'sometimes|in:enable,disable',
             'student_type'      => 'required|in:PAY,PENDING,PASS,FAIL',
+            'tuition_plan'      => ['nullable', 'string', Rule::in(self::TUITION_PLANS)],
             'exam_place'        => 'nullable|string|max:255',
             'bacll_code'        => 'nullable|string|max:255',
             'grade'             => 'required|string|max:50',
@@ -456,11 +574,14 @@ class StudentService extends BaseService
     /**
      * Update only student type
      */
-    public function setStudentType(int $id, string $studentType): Students
+    public function setStudentType(int $id, string $studentType, ?string $tuitionPlan = null): Students
     {
-        return $this->trace(__FUNCTION__, function () use ($id, $studentType): Students {
+        return $this->trace(__FUNCTION__, function () use ($id, $studentType, $tuitionPlan): Students {
             $student = $this->findById($id);
-            $student->update(['student_type' => $studentType]);
+            $student->update($this->normalizeTuitionPlan([
+                'student_type' => $studentType,
+                'tuition_plan' => $tuitionPlan,
+            ], $student));
             
             return $student->refresh()->load([
                 'academicInfo.major',

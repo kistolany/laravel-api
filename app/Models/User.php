@@ -25,6 +25,8 @@ class User extends Authenticatable
         'role_id',
         'student_id',
         'teacher_id',
+        'staff_id',
+        'account_purpose',
         'status',
         'full_name',
         'image',
@@ -51,6 +53,8 @@ class User extends Authenticatable
             'role_id' => 'integer',
             'student_id' => 'integer',
             'teacher_id' => 'integer',
+            'staff_id' => 'string',
+            'account_purpose' => 'string',
             'status' => 'string',
         ];
     }
