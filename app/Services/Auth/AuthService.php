@@ -107,7 +107,7 @@ class AuthService
                 $updates['role_id'] = (int) $data['role_id'];
                 $updates = [
                     ...$updates,
-                    ...$this->identityFieldsForRole((int) $data['role_id'], $data),
+                    ...$this->identityFieldsForRole((int) $data['role_id'], $data, $user),
                 ];
             }
             
@@ -453,15 +453,21 @@ class AuthService
         return $roleId;
     }
 
-    private function identityFieldsForRole(int $roleId, array $data): array
+    private function identityFieldsForRole(int $roleId, array $data, ?User $existingUser = null): array
     {
         $roleName = Role::whereKey($roleId)->value('name');
         $identityType = $this->identityTypeForRole($roleName);
 
         return [
-            'student_id' => $identityType === 'student' ? ($data['student_id'] ?? null) : null,
-            'teacher_id' => $identityType === 'teacher' ? ($data['teacher_id'] ?? null) : null,
-            'staff_id' => $identityType === 'staff' ? ($data['staff_id'] ?? $this->generateStaffId()) : null,
+            'student_id' => $identityType === 'student'
+                ? ($data['student_id'] ?? $existingUser?->student_id)
+                : null,
+            'teacher_id' => $identityType === 'teacher'
+                ? ($data['teacher_id'] ?? $existingUser?->teacher_id)
+                : null,
+            'staff_id' => $identityType === 'staff'
+                ? ($data['staff_id'] ?? $existingUser?->staff_id ?? $this->generateStaffId())
+                : null,
         ];
     }
 

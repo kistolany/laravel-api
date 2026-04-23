@@ -328,6 +328,12 @@ class StudentService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($data): Students {
             $validatedData = $this->validateExisting($data);
+            $shouldGenerateStudentCode = $this->shouldGenerateStudentCode($validatedData['id_card_number'] ?? null);
+
+            if ($shouldGenerateStudentCode) {
+                $validatedData['id_card_number'] = $this->temporaryStudentCode();
+            }
+
             $validatedData = $this->normalizeTuitionPlan($validatedData);
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
@@ -347,10 +353,17 @@ class StudentService extends BaseService
                 $addresses,
                 $parentGuardian,
                 $registration,
-                $scholarship
+                $scholarship,
+                $shouldGenerateStudentCode
             ) {
                 // 1. Create the Student record
                 $student = Students::create($validatedData);
+
+                if ($shouldGenerateStudentCode) {
+                    $student->forceFill([
+                        'id_card_number' => $this->generateStudentCode($student->id),
+                    ])->save();
+                }
             
                 // 2. Create the Academic Info record linked to this student
                 $student->academicInfo()->create($validatedData);
@@ -400,6 +413,10 @@ class StudentService extends BaseService
             $student = $this->findById($id);
             $validatedData = $this->validateExisting($data, $student->id);
             $validatedData = $this->normalizeTuitionPlan($validatedData, $student);
+            $validatedData['id_card_number'] = $this->resolvedStudentCode(
+                $validatedData['id_card_number'] ?? null,
+                $student
+            );
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
             $registration = $validatedData['registration'] ?? null;
@@ -515,6 +532,36 @@ class StudentService extends BaseService
         }
 
         return $data;
+    }
+
+    private function shouldGenerateStudentCode(mixed $value): bool
+    {
+        return trim((string) ($value ?? '')) === '';
+    }
+
+    private function resolvedStudentCode(mixed $incomingCode, Students $student): string
+    {
+        $normalizedCode = trim((string) ($incomingCode ?? ''));
+
+        if ($normalizedCode !== '') {
+            return $normalizedCode;
+        }
+
+        if (!empty($student->id_card_number)) {
+            return (string) $student->id_card_number;
+        }
+
+        return $this->generateStudentCode($student->id);
+    }
+
+    private function temporaryStudentCode(): string
+    {
+        return 'TMP-STU-' . now()->format('YmdHisv') . '-' . str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    }
+
+    private function generateStudentCode(int $studentId): string
+    {
+        return 'STU-' . str_pad((string) $studentId, 6, '0', STR_PAD_LEFT);
     }
 
     /**

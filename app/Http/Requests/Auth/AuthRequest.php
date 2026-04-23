@@ -166,9 +166,6 @@ class AuthRequest extends FormRequest
                 $validator->errors()->add('student_id', 'Please link this user to a student.');
             }
 
-            if ($identityType === 'staff' && !$this->filled('staff_id')) {
-                $validator->errors()->add('staff_id', 'Please enter a staff ID for this user.');
-            }
         });
     }
 
