@@ -31,6 +31,13 @@ class User extends Authenticatable
         'full_name',
         'image',
         'phone',
+        'department',
+        'position',
+        'join_date',
+        'base_salary',
+        'allowance',
+        'bank_name',
+        'bank_account',
     ];
 
     /**
@@ -56,6 +63,9 @@ class User extends Authenticatable
             'staff_id' => 'string',
             'account_purpose' => 'string',
             'status' => 'string',
+            'join_date' => 'date',
+            'base_salary' => 'decimal:2',
+            'allowance' => 'decimal:2',
         ];
     }
 

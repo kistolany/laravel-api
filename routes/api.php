@@ -124,6 +124,7 @@ Route::prefix('v1')->group(function () {
         Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
         Route::get('students/final-exam-list', [StudentController::class, 'finalExamList'])->middleware('permission:student.view');
         Route::get('students/pass', [StudentController::class, 'passStudents'])->middleware('permission:student.view');
+        Route::get('students/fail', [StudentController::class, 'failStudents'])->middleware('permission:student.view');
         Route::get('students/pending', [StudentController::class, 'pendingStudents'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['index', 'show'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['store'])->middleware('permission:student.create');

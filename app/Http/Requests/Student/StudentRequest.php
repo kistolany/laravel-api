@@ -12,6 +12,12 @@ class StudentRequest extends FormRequest
 
     public function rules(): array
     {
+        $isScholarshipTrack = in_array(
+            strtoupper((string) $this->input('student_type')),
+            ['PENDING', 'PASS', 'FAIL'],
+            true
+        );
+
         return [
             // Student Table Fields
             'full_name_kh'      => 'required|string|max:255',
@@ -67,6 +73,48 @@ class StudentRequest extends FormRequest
             'parent_guardian.guardian_name'  => 'nullable|string|max:255',
             'parent_guardian.guardian_job'   => 'nullable|string|max:255',
             'parent_guardian.guardian_phone' => 'nullable|string|max:255',
+
+            // Registration details
+            'registration'                     => 'nullable|array',
+            'registration.high_school_name'   => 'nullable|string|max:255',
+            'registration.high_school_province' => 'nullable|string|max:255',
+            'registration.bacii_exam_year'    => 'nullable|integer|min:2000|max:2100',
+            'registration.bacii_grade'        => 'nullable|string|max:10',
+            'registration.target_degree'      => 'nullable|string|max:255',
+            'registration.diploma_attached'   => 'nullable|boolean',
+
+            // Scholarship details
+            'scholarship'                     => [
+                Rule::requiredIf($isScholarshipTrack),
+                'nullable',
+                'array',
+            ],
+            'scholarship.nationality'         => 'nullable|string|max:255',
+            'scholarship.ethnicity'           => 'nullable|string|max:255',
+            'scholarship.emergency_name'      => [
+                Rule::requiredIf($isScholarshipTrack),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_relation'  => [
+                Rule::requiredIf($isScholarshipTrack),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_phone'     => [
+                Rule::requiredIf($isScholarshipTrack),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_address'   => 'nullable|string',
+            'scholarship.grade'               => 'nullable|string|max:10',
+            'scholarship.exam_year'           => 'nullable|integer|min:2000|max:2100',
+            'scholarship.guardians_address'   => 'nullable|string',
+            'scholarship.guardians_phone_number' => 'nullable|string|max:255',
+            'scholarship.guardians_email'     => 'nullable|email|max:255',
         ];
     }
 }

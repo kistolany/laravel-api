@@ -72,6 +72,13 @@ class AuthUserResource extends JsonResource
             'image' => $this->image,
             'status' => $this->status,
             'role' => $this->role?->name,
+            'department' => $this->department,
+            'position' => $this->position,
+            'join_date' => $this->join_date,
+            'base_salary' => $this->base_salary,
+            'allowance' => $this->allowance,
+            'bank_name' => $this->bank_name,
+            'bank_account' => $this->bank_account,
         ];
     }
 
@@ -93,5 +100,3 @@ class AuthUserResource extends JsonResource
         ];
     }
 }
-
-

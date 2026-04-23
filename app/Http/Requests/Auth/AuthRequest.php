@@ -52,6 +52,13 @@ class AuthRequest extends FormRequest
             'student_id' => 'nullable|integer|exists:students,id',
             'teacher_id' => 'nullable|integer|exists:teachers,id',
             'staff_id' => 'nullable|string|max:50',
+            'department' => 'nullable|string|max:255',
+            'position' => 'nullable|string|max:255',
+            'join_date' => 'nullable|date',
+            'base_salary' => 'nullable|numeric|min:0',
+            'allowance' => 'nullable|numeric|min:0',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_account' => 'nullable|string|max:255',
             'account_purpose' => 'nullable|string|in:Main Account,Assistant Account,Temporary Account',
             'image' => 'nullable|image|max:2048',
         ];
@@ -77,6 +84,13 @@ class AuthRequest extends FormRequest
             'student_id' => 'nullable|integer|exists:students,id',
             'teacher_id' => 'nullable|integer|exists:teachers,id',
             'staff_id' => 'nullable|string|max:50',
+            'department' => 'nullable|string|max:255',
+            'position' => 'nullable|string|max:255',
+            'join_date' => 'nullable|date',
+            'base_salary' => 'nullable|numeric|min:0',
+            'allowance' => 'nullable|numeric|min:0',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_account' => 'nullable|string|max:255',
             'account_purpose' => 'nullable|string|in:Main Account,Assistant Account,Temporary Account',
             'image' => 'nullable|image|max:2048',
         ];
@@ -170,4 +184,3 @@ class AuthRequest extends FormRequest
         };
     }
 }
-

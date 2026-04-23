@@ -54,6 +54,14 @@ class StudentController extends Controller
     }
 
     /**
+     * Display only students with student_type FAIL.
+     */
+    public function failStudents()
+    {
+        return $this->success($this->service->failStudents());
+    }
+
+    /**
      * Display only students with student_type PENDING (scholarship waiting for exam result).
      */
     public function pendingStudents()

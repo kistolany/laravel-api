@@ -59,6 +59,11 @@ class Students extends Model
         return $this->hasOne(StudentRegistration::class, 'student_id', 'id');
     }
 
+    public function scholarship(): HasOne
+    {
+        return $this->hasOne(Scholarship::class, 'student_id', 'id');
+    }
+
     public function classes(): BelongsToMany
     {
         return $this->belongsToMany(Classes::class, 'class_students', 'student_id', 'class_id')

@@ -42,12 +42,14 @@ class StudentService extends BaseService
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
             // 1. Start query with relationships
             $query = Students::with([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'registration',
+                'scholarship',
             ]);
             
             // 2. Filter by Major (Inside academicInfo table)
@@ -100,20 +102,7 @@ class StudentService extends BaseService
      */
     public function pendingStudents(): PaginatedResult
     {
-        $fn = __FUNCTION__;
-        return $this->trace($fn, function () use ($fn): PaginatedResult {
-            $query = Students::with([
-                'academicInfo.major.faculty',
-                'academicInfo.shift',
-                'addresses.province',
-                'addresses.district',
-                'addresses.commune',
-                'parentGuardian',
-            ])->where('student_type', 'PENDING')
-              ->where('status', 'active');
-
-            return $this->paginateResponse($query->latest(), StudentResource::class);
-        });
+        return $this->studentsByTypes(['PENDING'], __FUNCTION__);
     }
 
     /**
@@ -148,6 +137,17 @@ class StudentService extends BaseService
         return $this->studentsByTypes(['PASS'], __FUNCTION__);
     }
 
+    /**
+     * Get only FAIL scholarship students with pagination.
+     * Optional query params match payOrPass():
+     *   major_id, shift_id, faculty_id, stage, batch_year, study_days,
+     *   class_id, search, size
+     */
+    public function failStudents(): PaginatedResult
+    {
+        return $this->studentsByTypes(['FAIL'], __FUNCTION__);
+    }
+
     private function studentsByTypes(array $studentTypes, string $traceName, bool $excludeOverAbsentLimit = false): PaginatedResult
     {
         return $this->trace($traceName, function () use ($studentTypes, $excludeOverAbsentLimit): PaginatedResult {
@@ -159,6 +159,7 @@ class StudentService extends BaseService
                 'addresses.commune',
                 'parentGuardian',
                 'registration',
+                'scholarship',
                 'classes',
             ])->whereIn('student_type', $studentTypes)
               ->where('status', 'active');
@@ -299,12 +300,14 @@ class StudentService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($id): Students {
             $student = Students::with([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'registration',
+                'scholarship',
             ])->find($id);
             
             if (!$student) {
@@ -328,11 +331,24 @@ class StudentService extends BaseService
             $validatedData = $this->normalizeTuitionPlan($validatedData);
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
-            unset($validatedData['addresses'], $validatedData['parent_guardian']);
+            $registration = $validatedData['registration'] ?? null;
+            $scholarship = $validatedData['scholarship'] ?? null;
+            unset(
+                $validatedData['addresses'],
+                $validatedData['parent_guardian'],
+                $validatedData['registration'],
+                $validatedData['scholarship']
+            );
             
             $validatedData = $this->handleImageUpload($validatedData);
             
-            return DB::transaction(function () use ($validatedData, $addresses, $parentGuardian) {
+            return DB::transaction(function () use (
+                $validatedData,
+                $addresses,
+                $parentGuardian,
+                $registration,
+                $scholarship
+            ) {
                 // 1. Create the Student record
                 $student = Students::create($validatedData);
             
@@ -348,14 +364,26 @@ class StudentService extends BaseService
                 if ($parentGuardian) {
                     $student->parentGuardian()->create($parentGuardian);
                 }
+
+                // 5. Create Registration details when provided
+                if ($this->hasSectionValues($registration)) {
+                    $student->registration()->create($registration);
+                }
+
+                // 6. Create Scholarship details when provided
+                if ($this->hasSectionValues($scholarship)) {
+                    $student->scholarship()->create($scholarship);
+                }
             
                 return $student->load([
-                    'academicInfo.major',
+                    'academicInfo.major.faculty',
                     'academicInfo.shift',
                     'addresses.province',
                     'addresses.district',
                     'addresses.commune',
                     'parentGuardian',
+                    'registration',
+                    'scholarship',
                 ]);
             });
             
@@ -374,11 +402,25 @@ class StudentService extends BaseService
             $validatedData = $this->normalizeTuitionPlan($validatedData, $student);
             $addresses = $validatedData['addresses'] ?? [];
             $parentGuardian = $validatedData['parent_guardian'] ?? null;
-            unset($validatedData['addresses'], $validatedData['parent_guardian']);
+            $registration = $validatedData['registration'] ?? null;
+            $scholarship = $validatedData['scholarship'] ?? null;
+            unset(
+                $validatedData['addresses'],
+                $validatedData['parent_guardian'],
+                $validatedData['registration'],
+                $validatedData['scholarship']
+            );
             
             $validatedData = $this->handleImageUpload($validatedData, $student->image);
             
-            return DB::transaction(function () use ($student, $validatedData, $addresses, $parentGuardian) {
+            return DB::transaction(function () use (
+                $student,
+                $validatedData,
+                $addresses,
+                $parentGuardian,
+                $registration,
+                $scholarship
+            ) {
                 // 1. Update Student Table
                 $student->update($validatedData);
             
@@ -403,14 +445,32 @@ class StudentService extends BaseService
                         $parentGuardian
                     );
                 }
+
+                // 5. Update or create registration details
+                if ($this->hasSectionValues($registration)) {
+                    $student->registration()->updateOrCreate(
+                        ['student_id' => $student->id],
+                        $registration
+                    );
+                }
+
+                // 6. Update or create scholarship details
+                if ($this->hasSectionValues($scholarship)) {
+                    $student->scholarship()->updateOrCreate(
+                        ['student_id' => $student->id],
+                        $scholarship
+                    );
+                }
             
                 return $student->refresh()->load([
-                    'academicInfo.major',
+                    'academicInfo.major.faculty',
                     'academicInfo.shift',
                     'addresses.province',
                     'addresses.district',
                     'addresses.commune',
                     'parentGuardian',
+                    'registration',
+                    'scholarship',
                 ]);
             });
             
@@ -516,6 +576,64 @@ class StudentService extends BaseService
             'parent_guardian.guardian_name'  => 'nullable|string|max:255',
             'parent_guardian.guardian_job'   => 'nullable|string|max:255',
             'parent_guardian.guardian_phone' => 'nullable|string|max:255',
+
+            // Student registration details
+            'registration'                     => 'nullable|array',
+            'registration.high_school_name'   => 'nullable|string|max:255',
+            'registration.high_school_province' => 'nullable|string|max:255',
+            'registration.bacii_exam_year'    => 'nullable|integer|min:2000|max:2100',
+            'registration.bacii_grade'        => 'nullable|string|max:10',
+            'registration.target_degree'      => 'nullable|string|max:255',
+            'registration.diploma_attached'   => 'nullable|boolean',
+
+            // Scholarship-specific details
+            'scholarship' => [
+                Rule::requiredIf(fn () => in_array(
+                    strtoupper((string) ($data['student_type'] ?? '')),
+                    ['PENDING', 'PASS', 'FAIL'],
+                    true
+                )),
+                'nullable',
+                'array',
+            ],
+            'scholarship.nationality' => 'nullable|string|max:255',
+            'scholarship.ethnicity' => 'nullable|string|max:255',
+            'scholarship.emergency_name' => [
+                Rule::requiredIf(fn () => in_array(
+                    strtoupper((string) ($data['student_type'] ?? '')),
+                    ['PENDING', 'PASS', 'FAIL'],
+                    true
+                )),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_relation' => [
+                Rule::requiredIf(fn () => in_array(
+                    strtoupper((string) ($data['student_type'] ?? '')),
+                    ['PENDING', 'PASS', 'FAIL'],
+                    true
+                )),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_phone' => [
+                Rule::requiredIf(fn () => in_array(
+                    strtoupper((string) ($data['student_type'] ?? '')),
+                    ['PENDING', 'PASS', 'FAIL'],
+                    true
+                )),
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'scholarship.emergency_address' => 'nullable|string',
+            'scholarship.grade' => 'nullable|string|max:10',
+            'scholarship.exam_year' => 'nullable|integer|min:2000|max:2100',
+            'scholarship.guardians_address' => 'nullable|string',
+            'scholarship.guardians_phone_number' => 'nullable|string|max:255',
+            'scholarship.guardians_email' => 'nullable|email|max:255',
         ]);
 
         if ($validator->fails()) {
@@ -559,12 +677,14 @@ class StudentService extends BaseService
             $student->update(['status' => $status]);
             
             return $student->refresh()->load([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'registration',
+                'scholarship',
             ]);
             
             
@@ -584,12 +704,14 @@ class StudentService extends BaseService
             ], $student));
             
             return $student->refresh()->load([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
                 'addresses.commune',
                 'parentGuardian',
+                'registration',
+                'scholarship',
             ]);
             
             
@@ -607,11 +729,14 @@ class StudentService extends BaseService
             $student->update($validatedData);
             
             return $student->refresh()->load([
-                'academicInfo.major',
+                'academicInfo.major.faculty',
                 'academicInfo.shift',
                 'addresses.province',
                 'addresses.district',
                 'addresses.commune',
+                'parentGuardian',
+                'registration',
+                'scholarship',
             ]);
             
             
@@ -776,6 +901,29 @@ class StudentService extends BaseService
         }
 
         return $context;
+    }
+
+    private function hasSectionValues(?array $data): bool
+    {
+        if (!$data) {
+            return false;
+        }
+
+        foreach ($data as $value) {
+            if (is_bool($value)) {
+                if ($value) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if ($value !== null && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

@@ -75,10 +75,15 @@ class AuthService
                 'status' => $data['status'] ?? 'Active',
                 'full_name' => $data['full_name'] ?? null,
                 'phone' => $data['phone'] ?? null,
+                'department' => $data['department'] ?? null,
+                'position' => $data['position'] ?? null,
+                'join_date' => $data['join_date'] ?? null,
+                'base_salary' => $data['base_salary'] ?? null,
+                'allowance' => $data['allowance'] ?? null,
+                'bank_name' => $data['bank_name'] ?? null,
+                'bank_account' => $data['bank_account'] ?? null,
                 'image' => $imagePath,
             ]);
-            
-            
         });
     }
 
@@ -96,6 +101,7 @@ class AuthService
             if (isset($data['phone'])) {
                 $updates['phone'] = $data['phone'];
             }
+
             
             if (isset($data['role_id'])) {
                 $updates['role_id'] = (int) $data['role_id'];
@@ -115,6 +121,15 @@ class AuthService
 
             if (isset($data['account_purpose'])) {
                 $updates['account_purpose'] = $data['account_purpose'];
+            }
+
+            foreach ([
+                'department', 'position', 'join_date', 'base_salary', 
+                'allowance', 'bank_name', 'bank_account'
+            ] as $field) {
+                if (isset($data[$field])) {
+                    $updates[$field] = $data[$field];
+                }
             }
             
             // Only update password if a new one is provided
@@ -446,8 +461,28 @@ class AuthService
         return [
             'student_id' => $identityType === 'student' ? ($data['student_id'] ?? null) : null,
             'teacher_id' => $identityType === 'teacher' ? ($data['teacher_id'] ?? null) : null,
-            'staff_id' => $identityType === 'staff' ? ($data['staff_id'] ?? null) : null,
+            'staff_id' => $identityType === 'staff' ? ($data['staff_id'] ?? $this->generateStaffId()) : null,
         ];
+    }
+
+    /**
+     * Auto-generate a sequential staff ID in the format STF-001, STF-002, etc.
+     */
+    private function generateStaffId(): string
+    {
+        $lastStaff = User::whereNotNull('staff_id')
+            ->where('staff_id', 'LIKE', 'STF-%')
+            ->orderByRaw("CAST(SUBSTRING(staff_id, 5) AS UNSIGNED) DESC")
+            ->value('staff_id');
+
+        if ($lastStaff) {
+            $lastNumber = (int) substr($lastStaff, 4);
+            $nextNumber = $lastNumber + 1;
+        } else {
+            $nextNumber = 1;
+        }
+
+        return 'STF-' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
     }
 
     private function identityTypeForRole(?string $roleName): ?string
