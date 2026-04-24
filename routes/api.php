@@ -28,6 +28,7 @@ use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\Chat\ChatController;
+use App\Http\Controllers\ApiController\StaffAttendance\StaffAttendanceController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use App\Http\Controllers\ApiController\SubjectClassroom\SubjectClassroomController;
 use Illuminate\Http\Request;
@@ -112,6 +113,12 @@ Route::prefix('v1')->group(function () {
         Route::post('teacher-attendances/bulk',   [TeacherAttendanceController::class, 'bulk'])->middleware('permission:teacher_attendance.create');
         Route::get('teacher-attendances/history', [TeacherAttendanceController::class, 'history'])->middleware('permission:teacher_attendance.view');
         Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report'])->middleware('permission:teacher_attendance.view');
+
+        // Staff Attendance routes
+        Route::get('staff-attendances', [StaffAttendanceController::class, 'index'])->middleware('permission:user.view');
+        Route::post('staff-attendances/bulk', [StaffAttendanceController::class, 'bulk'])->middleware('permission:user.update');
+        Route::get('staff-attendances/history', [StaffAttendanceController::class, 'history'])->middleware('permission:user.view');
+        Route::get('staff-attendances/report', [StaffAttendanceController::class, 'report'])->middleware('permission:user.view');
 
         // Role & Permission management (Admin only)
         Route::middleware('role:Admin')->group(function () {

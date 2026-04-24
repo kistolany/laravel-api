@@ -89,6 +89,11 @@ class User extends Authenticatable
         return $this->hasMany(RefreshToken::class);
     }
 
+    public function staffAttendances(): HasMany
+    {
+        return $this->hasMany(StaffAttendance::class, 'user_id');
+    }
+
     public function hasRole(string $role): bool
     {
         $name = $this->role?->name;

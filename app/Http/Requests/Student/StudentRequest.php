@@ -24,7 +24,7 @@ class StudentRequest extends FormRequest
             'full_name_en'      => 'required|string|max:255',
             'gender'            => 'required|in:Male,Female,Other',
             'dob'               => 'required|date',
-            'phone'             => 'nullable|string',
+            'phone'             => 'required|string|max:255',
             'email'             => 'nullable|string',
             'id_card_number'    => [
                 'nullable',

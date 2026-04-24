@@ -575,7 +575,7 @@ class StudentService extends BaseService
             'full_name_en'   => 'required|string|max:255',
             'gender'         => 'required|in:Male,Female,Other',
             'dob'            => 'required|date',
-            'phone'          => 'nullable|string',
+            'phone'          => 'required|string|max:255',
             'email'          => [
                 'nullable',
                 'email',
