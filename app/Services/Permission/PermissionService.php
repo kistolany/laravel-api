@@ -5,6 +5,7 @@ namespace App\Services\Permission;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Models\Permission;
+use App\Support\RbacPermissionCatalog;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use App\Services\Concerns\ServiceTraceable;
@@ -15,11 +16,35 @@ class PermissionService
     public function index(): Collection
     {
         return $this->trace(__FUNCTION__, function (): Collection {
-            return Permission::query()
+            $storedPermissions = Permission::query()
                 ->orderBy('name')
-                ->get();
-            
-            
+                ->get()
+                ->keyBy('name');
+
+            $catalogPermissions = collect(RbacPermissionCatalog::all())
+                ->map(function (string $name) use ($storedPermissions): array {
+                    $stored = $storedPermissions->get($name);
+
+                    return [
+                        'id' => $stored?->id,
+                        'name' => $name,
+                        'available' => $stored !== null,
+                    ];
+                });
+
+            $customStoredPermissions = $storedPermissions
+                ->reject(fn (Permission $permission, string $name) => RbacPermissionCatalog::contains($name))
+                ->map(fn (Permission $permission): array => [
+                    'id' => $permission->id,
+                    'name' => $permission->name,
+                    'available' => true,
+                ])
+                ->values();
+
+            return $catalogPermissions
+                ->concat($customStoredPermissions)
+                ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
+                ->values();
         });
     }
 

@@ -282,12 +282,11 @@ class AttendanceSessionService
             $subjectId = $this->toNullableInt($filters['subject_id'] ?? null);
 
             if (!$classId || !$subjectId) {
-                return $this->errorResponse(422, 'Validation failed.', [
-                    'errors' => [
-                        'class_id' => ['Class is required.'],
-                        'subject_id' => ['Subject is required.'],
-                    ],
-                ]);
+                return $this->successResponse(
+                    200,
+                    'Attendance summary retrieved successfully.',
+                    $this->buildAttendanceSummaryPayload($filters)
+                );
             }
 
             $class = $this->findClassForMatrix($classId, $filters);
@@ -324,6 +323,90 @@ class AttendanceSessionService
                 )
             );
         });
+    }
+
+    private function buildAttendanceSummaryPayload(array $filters): array
+    {
+        $classId = $this->toNullableInt($filters['class_id'] ?? null);
+        $subjectId = $this->toNullableInt($filters['subject_id'] ?? null);
+
+        $sessionsQuery = AttendanceSession::query()
+            ->with(['records.student.academicInfo.major.faculty']);
+
+        $this->applySessionContextFilters($sessionsQuery, $filters);
+
+        $sessions = $sessionsQuery
+            ->when($classId, fn ($query, $value) => $query->where('class_id', $value))
+            ->when($subjectId, fn ($query, $value) => $query->where('subject_id', $value))
+            ->orderByDesc('session_date')
+            ->orderBy('session_number')
+            ->orderBy('id')
+            ->get();
+
+        $students = [];
+        $summary = [
+            'total_students' => 0,
+            'total_sessions' => 0,
+            'present' => 0,
+            'absent' => 0,
+            'late' => 0,
+            'excused' => 0,
+        ];
+
+        foreach ($sessions as $session) {
+            foreach ($session->records as $record) {
+                $student = $record->student;
+
+                if (!$student || !$this->studentMatchesMatrixFilters($student, $filters)) {
+                    continue;
+                }
+
+                $studentId = (int) $student->id;
+                $status = $this->statusToUi($record->status);
+
+                if (!isset($students[$studentId])) {
+                    $students[$studentId] = [
+                        'key' => (string) $studentId,
+                        'student_id' => $studentId,
+                        'barcode' => $student->barcode ?: $student->id_card_number,
+                        'student_code' => $student->id_card_number ?: $student->barcode,
+                        'full_name_kh' => $student->full_name_kh,
+                        'full_name_en' => $student->full_name_en,
+                        'gender' => $student->gender,
+                        'faculty_name' => $student->academicInfo?->major?->faculty?->name,
+                        'major_name' => $student->academicInfo?->major?->name,
+                        'sessions' => [],
+                    ];
+                }
+
+                $students[$studentId]['sessions'][] = $status;
+                $summary['total_sessions']++;
+
+                match ($status) {
+                    'A' => $summary['absent']++,
+                    'L' => $summary['late']++,
+                    'P' => $summary['excused']++,
+                    default => $summary['present']++,
+                };
+            }
+        }
+
+        $rows = collect($students)
+            ->sortBy(fn (array $student) => strtolower($student['full_name_en'] ?: $student['full_name_kh'] ?: (string) $student['student_id']))
+            ->values()
+            ->map(function (array $student, int $index): array {
+                $student['no'] = $index + 1;
+                return $student;
+            })
+            ->all();
+
+        $summary['total_students'] = count($rows);
+
+        return [
+            'mode' => 'summary',
+            'students' => $rows,
+            'summary' => $summary,
+        ];
     }
 
     public function saveMatrixResponse(array $data): array

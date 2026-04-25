@@ -75,8 +75,8 @@ Route::prefix('v1')->group(function () {
             Route::get('me', [AuthController::class, 'me']);
             Route::post('profile', [AuthController::class, 'updateProfile']);
             Route::post('audit-logs', [AuditLogController::class, 'store']);
-            Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('role:Admin');
-            Route::delete('audit-logs', [AuditLogController::class, 'destroy'])->middleware('role:Admin');
+            Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('permission:audit_log.view');
+            Route::delete('audit-logs', [AuditLogController::class, 'destroy'])->middleware('permission:audit_log.delete|audit_log.view');
             Route::post('logout', [AuthController::class, 'logout']);
             Route::post('logout-all', [AuthController::class, 'logoutAll']);
             Route::post('revoke', [AuthController::class, 'revoke']);
@@ -115,17 +115,21 @@ Route::prefix('v1')->group(function () {
         Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report'])->middleware('permission:teacher_attendance.view');
 
         // Staff Attendance routes
-        Route::get('staff-attendances', [StaffAttendanceController::class, 'index'])->middleware('permission:user.view');
-        Route::post('staff-attendances/bulk', [StaffAttendanceController::class, 'bulk'])->middleware('permission:user.update');
-        Route::get('staff-attendances/history', [StaffAttendanceController::class, 'history'])->middleware('permission:user.view');
-        Route::get('staff-attendances/report', [StaffAttendanceController::class, 'report'])->middleware('permission:user.view');
+        Route::get('staff-attendances', [StaffAttendanceController::class, 'index'])->middleware('permission:staff_attendance.view|user.view');
+        Route::post('staff-attendances/bulk', [StaffAttendanceController::class, 'bulk'])->middleware('permission:staff_attendance.create|staff_attendance.update|user.update');
+        Route::get('staff-attendances/history', [StaffAttendanceController::class, 'history'])->middleware('permission:staff_attendance.view|user.view');
+        Route::get('staff-attendances/report', [StaffAttendanceController::class, 'report'])->middleware('permission:staff_attendance.report|staff_attendance.view|user.view');
 
-        // Role & Permission management (Admin only)
-        Route::middleware('role:Admin')->group(function () {
-            Route::apiResource('roles', RoleController::class);
-            Route::apiResource('permissions', PermissionController::class);
-            Route::post('roles/{id}/permissions', [RoleController::class, 'assignPermissions']);
-        });
+        // Role & Permission management
+        Route::apiResource('roles', RoleController::class)->only(['index', 'show'])->middleware('permission:role.view');
+        Route::apiResource('roles', RoleController::class)->only(['store'])->middleware('permission:role.create');
+        Route::apiResource('roles', RoleController::class)->only(['update'])->middleware('permission:role.update');
+        Route::apiResource('roles', RoleController::class)->only(['destroy'])->middleware('permission:role.delete');
+        Route::apiResource('permissions', PermissionController::class)->only(['index', 'show'])->middleware('permission:permission.view|role.view');
+        Route::apiResource('permissions', PermissionController::class)->only(['store'])->middleware('permission:permission.create|role.create');
+        Route::apiResource('permissions', PermissionController::class)->only(['update'])->middleware('permission:permission.update|role.update');
+        Route::apiResource('permissions', PermissionController::class)->only(['destroy'])->middleware('permission:permission.delete|role.delete');
+        Route::post('roles/{id}/permissions', [RoleController::class, 'assignPermissions'])->middleware('permission:role.update');
 
         // Student routes
         Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
@@ -144,12 +148,12 @@ Route::prefix('v1')->group(function () {
         Route::get('students/{id}/classes', [StudentController::class, 'classes'])->middleware('permission:student.classes.view');
 
         // Student payment routes
-        Route::get('student-payments/plans', [StudentPaymentController::class, 'plans'])->middleware('permission:student.view');
-        Route::get('student-payments', [StudentPaymentController::class, 'index'])->middleware('permission:student.view');
-        Route::get('student-payments/{id}', [StudentPaymentController::class, 'show'])->whereNumber('id')->middleware('permission:student.view');
-        Route::post('student-payments', [StudentPaymentController::class, 'store'])->middleware('permission:student.create');
-        Route::put('student-payments/{id}', [StudentPaymentController::class, 'update'])->whereNumber('id')->middleware('permission:student.update');
-        Route::delete('student-payments/{id}', [StudentPaymentController::class, 'destroy'])->whereNumber('id')->middleware('permission:student.delete');
+        Route::get('student-payments/plans', [StudentPaymentController::class, 'plans'])->middleware('permission:student_payment.view|student.view');
+        Route::get('student-payments', [StudentPaymentController::class, 'index'])->middleware('permission:student_payment.view|student.view');
+        Route::get('student-payments/{id}', [StudentPaymentController::class, 'show'])->whereNumber('id')->middleware('permission:student_payment.view|student.view');
+        Route::post('student-payments', [StudentPaymentController::class, 'store'])->middleware('permission:student_payment.create|student.create');
+        Route::put('student-payments/{id}', [StudentPaymentController::class, 'update'])->whereNumber('id')->middleware('permission:student_payment.update|student.update');
+        Route::delete('student-payments/{id}', [StudentPaymentController::class, 'destroy'])->whereNumber('id')->middleware('permission:student_payment.delete|student.delete');
 
         // Student Card routes
         Route::get('student-cards', [StudentCardController::class, 'index'])->middleware('permission:student.card.view');
@@ -306,6 +310,7 @@ Route::prefix('v1')->group(function () {
         Route::get('homework/{id}/submissions', [SubjectClassroomController::class, 'submissions'])->whereNumber('id');
         Route::post('homework/{id}/submit', [SubjectClassroomController::class, 'submitHomework'])->whereNumber('id');
         Route::patch('submissions/{id}/grade', [SubjectClassroomController::class, 'gradeSubmission'])->whereNumber('id');
+        Route::patch('submissions/{id}/review', [SubjectClassroomController::class, 'reviewSubmission'])->whereNumber('id');
     });
 
 });

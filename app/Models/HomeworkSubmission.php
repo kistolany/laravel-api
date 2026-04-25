@@ -21,6 +21,7 @@ class HomeworkSubmission extends Model
         'is_late',
         'score',
         'feedback',
+        'reviewed_at',
     ];
 
     protected $casts = [
@@ -28,6 +29,7 @@ class HomeworkSubmission extends Model
         'submitted_at' => 'datetime',
         'is_late'      => 'boolean',
         'score'        => 'decimal:2',
+        'reviewed_at'  => 'datetime',
     ];
 
     public function assignment(): BelongsTo

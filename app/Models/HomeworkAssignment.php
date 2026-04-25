@@ -14,6 +14,7 @@ class HomeworkAssignment extends Model
         'class_id',
         'subject_id',
         'teacher_id',
+        'assessment_type',
         'title',
         'description',
         'attachment_url',

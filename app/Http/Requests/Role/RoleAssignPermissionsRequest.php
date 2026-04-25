@@ -3,6 +3,8 @@
 namespace App\Http\Requests\Role;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use App\Support\RbacPermissionCatalog;
 
 class RoleAssignPermissionsRequest extends FormRequest
 {
@@ -13,11 +15,13 @@ class RoleAssignPermissionsRequest extends FormRequest
 
     public function rules(): array
     {
+        $knownPermissionNames = RbacPermissionCatalog::all();
+
         return [
             'permission_ids' => ['nullable', 'array', 'min:1'],
             'permission_ids.*' => ['integer', 'exists:permissions,id'],
             'permissions' => ['nullable', 'array', 'min:1'],
-            'permissions.*' => ['string', 'exists:permissions,name'],
+            'permissions.*' => ['string', Rule::in($knownPermissionNames)],
             'mode' => ['nullable', 'in:add,sync'],
         ];
     }

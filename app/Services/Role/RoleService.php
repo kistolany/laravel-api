@@ -6,6 +6,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Support\RbacPermissionCatalog;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use App\Services\Concerns\ServiceTraceable;
@@ -144,8 +145,46 @@ class RoleService
             $permissionIds = $data['permission_ids'] ?? [];
             
             if (empty($permissionIds) && !empty($data['permissions'])) {
-                $permissionIds = Permission::whereIn('name', $data['permissions'])
-                    ->pluck('id')
+                $permissionNames = collect($data['permissions'])
+                    ->map(fn ($name) => trim((string) $name))
+                    ->filter()
+                    ->unique()
+                    ->values();
+
+                if ($permissionNames->isEmpty()) {
+                    throw new ApiException(ResponseStatus::BAD_REQUEST, 'permission_ids or permissions is required.');
+                }
+
+                $catalogNames = collect(RbacPermissionCatalog::all());
+                $unknownNames = $permissionNames
+                    ->reject(fn ($name) => $catalogNames->contains($name))
+                    ->values()
+                    ->all();
+
+                if (!empty($unknownNames)) {
+                    Log::warning('Permission assignment payload invalid: unknown permissions.', [
+                        'unknown_permissions' => $unknownNames,
+                    ]);
+                    throw new ApiException(
+                        ResponseStatus::BAD_REQUEST,
+                        'Unknown permissions provided.',
+                        data: ['unknown_permissions' => $unknownNames]
+                    );
+                }
+
+                $existingPermissions = Permission::whereIn('name', $permissionNames)->get()->keyBy('name');
+                $missingNames = $permissionNames
+                    ->reject(fn ($name) => $existingPermissions->has($name))
+                    ->values();
+
+                foreach ($missingNames as $name) {
+                    $permission = Permission::firstOrCreate(['name' => $name]);
+                    $existingPermissions->put($name, $permission);
+                }
+
+                $permissionIds = $permissionNames
+                    ->map(fn ($name) => (int) $existingPermissions->get($name)->id)
+                    ->values()
                     ->all();
             }
             

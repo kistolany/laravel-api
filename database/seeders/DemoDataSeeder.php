@@ -119,24 +119,37 @@ class DemoDataSeeder extends Seeder
         // 8. Students (10 total: 4 PAY, 3 PASS, 3 PENDING)
         $students = [];
         $types = ['PAY', 'PAY', 'PAY', 'PAY', 'PASS', 'PASS', 'PASS', 'PENDING', 'PENDING', 'PENDING'];
+        $studentProfiles = [
+            ['kh' => 'សុខ ដារា', 'en' => 'Sok Dara', 'gender' => 'Male'],
+            ['kh' => 'ចាន់ ស្រីនាង', 'en' => 'Chan Sreynang', 'gender' => 'Female'],
+            ['kh' => 'ហេង វិសាល', 'en' => 'Heng Visal', 'gender' => 'Male'],
+            ['kh' => 'លី សុភ័ក្ត្រា', 'en' => 'Ly Sopheaktra', 'gender' => 'Female'],
+            ['kh' => 'វ៉ាន់ បូរិន', 'en' => 'Vann Borin', 'gender' => 'Male'],
+            ['kh' => 'គឹម ស្រីពេជ្រ', 'en' => 'Kim Sreypich', 'gender' => 'Female'],
+            ['kh' => 'ផល វិចិត្រ', 'en' => 'Phal Vichet', 'gender' => 'Male'],
+            ['kh' => 'ទេព សុគន្ធា', 'en' => 'Tep Sokunthea', 'gender' => 'Female'],
+            ['kh' => 'ម៉ៅ រតនា', 'en' => 'Mao Ratanak', 'gender' => 'Male'],
+            ['kh' => 'អ៊ិន ស្រីមុំ', 'en' => 'In Srey Mom', 'gender' => 'Female'],
+        ];
         
-        for ($i = 0; $i < 10; $i++) {
+        for ($i = 0; $i < count($studentProfiles); $i++) {
             $type = $types[$i];
             $num = $i + 1;
+            $profile = $studentProfiles[$i];
             $student_shift_id = $shiftIds[$i % count($shiftIds)];
             
             $student = Students::updateOrCreate(
-                ['full_name_en' => "STUDENT $num"],
+                ['email' => 'student' . $num . '@example.com'],
                 [
-                    'full_name_kh' => "សិស្ស ទី$num",
-                    'gender' => $num % 2 == 0 ? 'Female' : 'Male',
+                    'full_name_kh' => $profile['kh'],
+                    'gender' => $profile['gender'],
                     'dob' => '2005-01-' . str_pad($num, 2, '0', STR_PAD_LEFT),
-                    'phone' => "09988776" . str_pad($num, 2, '0', STR_PAD_LEFT),
-                    'email' => "student$num@example.com",
-                    'id_card_number' => "ID-STUD-" . str_pad($num, 4, '0', STR_PAD_LEFT),
+                    'phone' => '09988776' . str_pad($num, 2, '0', STR_PAD_LEFT),
+                    'email' => 'student' . $num . '@example.com',
+                    'id_card_number' => 'STU-' . str_pad((string) $num, 6, '0', STR_PAD_LEFT),
                     'student_type' => $type,
                     'status' => 'active',
-                    'bacll_code' => "B" . str_pad($num, 5, '0', STR_PAD_LEFT),
+                    'bacll_code' => 'B' . str_pad((string) $num, 5, '0', STR_PAD_LEFT),
                     'grade' => 'A',
                     'doc' => now()->toDateString(),
                 ]

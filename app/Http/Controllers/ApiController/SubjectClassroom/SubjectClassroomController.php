@@ -9,18 +9,138 @@ use App\Exceptions\ApiException;
 use App\Models\ClassSchedule;
 use App\Models\HomeworkAssignment;
 use App\Models\HomeworkSubmission;
+use App\Models\StudentScore;
 use App\Models\SubjectLesson;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Traits\ApiResponseTrait;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 class SubjectClassroomController extends Controller
 {
     use ApiResponseTrait;
 
+    private function supportsHomeworkReviewState(): bool
+    {
+        return Schema::hasColumn('homework_submissions', 'reviewed_at');
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────
+
+    private function normalizeAssessmentType(?string $value): string
+    {
+        $type = strtolower(trim((string) ($value ?: 'homework')));
+
+        return in_array($type, ['homework', 'assignment', 'midterm', 'final'], true)
+            ? $type
+            : 'homework';
+    }
+
+    private function assessmentConfig(?string $type = null): array
+    {
+        return match ($this->normalizeAssessmentType($type)) {
+            'assignment' => [
+                'type' => 'assignment',
+                'label' => 'Assignment',
+                'upload_folder' => 'assignments',
+                'default_max_score' => 10,
+                'score_field' => 'assignment_score',
+            ],
+            'midterm' => [
+                'type' => 'midterm',
+                'label' => 'Midterm',
+                'upload_folder' => 'midterms',
+                'default_max_score' => 20,
+                'score_field' => 'midterm_score',
+            ],
+            'final' => [
+                'type' => 'final',
+                'label' => 'Final',
+                'upload_folder' => 'finals',
+                'default_max_score' => 50,
+                'score_field' => 'final_score',
+            ],
+            default => [
+                'type' => 'homework',
+                'label' => 'Homework',
+                'upload_folder' => 'homework',
+                'default_max_score' => 100,
+                'score_field' => null,
+            ],
+        };
+    }
+
+    private function ensureOfficialAssessmentSlotAvailable(string $type, int $classId, int $subjectId, ?int $ignoreId = null): void
+    {
+        $config = $this->assessmentConfig($type);
+
+        if (!$config['score_field']) {
+            return;
+        }
+
+        $exists = HomeworkAssignment::query()
+            ->where('class_id', $classId)
+            ->where('subject_id', $subjectId)
+            ->where('assessment_type', $config['type'])
+            ->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))
+            ->exists();
+
+        if ($exists) {
+            throw new ApiException(
+                ResponseStatus::EXISTING_DATA,
+                "An official {$config['label']} already exists for this class and subject. Delete it first if you need to replace it."
+            );
+        }
+    }
+
+    private function syncAssessmentScore(HomeworkSubmission $submission, ?float $score): void
+    {
+        $submission->loadMissing('assignment.classroom');
+
+        $assignment = $submission->assignment;
+        $config = $this->assessmentConfig($assignment?->assessment_type);
+        $scoreField = $config['score_field'];
+
+        if (!$assignment || !$scoreField) {
+            return;
+        }
+
+        $classroom = $assignment->classroom;
+        $context = [
+            'student_id' => $submission->student_id,
+            'class_id' => $assignment->class_id,
+            'subject_id' => $assignment->subject_id,
+            'academic_year' => $classroom?->academic_year,
+            'year_level' => $classroom?->year_level !== null ? (string) $classroom->year_level : null,
+            'semester' => $classroom?->semester !== null ? (string) $classroom->semester : null,
+        ];
+
+        $scoreRecord = StudentScore::query()->where($context)->first();
+
+        if (!$scoreRecord && $score === null) {
+            return;
+        }
+
+        $scoreRecord ??= new StudentScore($context);
+        $scoreRecord->{$scoreField} = $score;
+        $scoreRecord->save();
+    }
+
+    private function clearAssessmentScoresForAssignment(HomeworkAssignment $assignment): void
+    {
+        $assignment->loadMissing('submissions');
+        $config = $this->assessmentConfig($assignment->assessment_type);
+
+        if (!$config['score_field']) {
+            return;
+        }
+
+        foreach ($assignment->submissions as $submission) {
+            $this->syncAssessmentScore($submission, null);
+        }
+    }
 
     /**
      * Upload a file to Cloudinary.
@@ -257,6 +377,8 @@ class SubjectClassroomController extends Controller
     public function homework(Request $request)
     {
         $actor = $this->resolveActor($request);
+        $assessmentConfig = $this->assessmentConfig($request->input('type'));
+        $supportsReviewState = $this->supportsHomeworkReviewState();
         $query = HomeworkAssignment::with([
                 'teacher:id,first_name,last_name',
                 'subject:id,name',
@@ -266,7 +388,24 @@ class SubjectClassroomController extends Controller
             ])
             ->withCount('submissions');
 
+        if ($supportsReviewState) {
+            $query->withCount([
+                'submissions as unreviewed_submissions_count' => fn ($submissionQuery) => $submissionQuery->whereNull('reviewed_at'),
+            ]);
+        }
+
+        if ($actor['scope'] === 'student' && $actor['student_id']) {
+            $query->with([
+                'submissions' => function ($submissionQuery) use ($actor) {
+                    $submissionQuery
+                        ->where('student_id', $actor['student_id'])
+                        ->latest('submitted_at');
+                },
+            ]);
+        }
+
         $this->applyVisibleContentScope($query, $actor, 'homework_assignments');
+        $query->where('assessment_type', $assessmentConfig['type']);
 
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->class_id);
@@ -289,12 +428,31 @@ class SubjectClassroomController extends Controller
         $paginated = $query->latest()->paginate($perPage);
 
         // Append computed field
-        $paginated->getCollection()->transform(function ($hw) {
+        $paginated->getCollection()->transform(function ($hw) use ($actor, $supportsReviewState) {
             $hw->is_overdue = $hw->is_overdue;
+            $hw->unreviewed_submissions_count = $supportsReviewState
+                ? ($hw->unreviewed_submissions_count ?? 0)
+                : ($hw->submissions_count ?? 0);
+            $hw->assessment_type = $this->normalizeAssessmentType($hw->assessment_type);
+            $hw->score_field = $this->assessmentConfig($hw->assessment_type)['score_field'];
+
+            if ($actor['scope'] === 'student' && $actor['student_id']) {
+                $submission = $hw->relationLoaded('submissions') ? $hw->submissions->first() : null;
+                $hw->setRelation('my_submission', $submission);
+                $hw->submission_state = $submission
+                    ? ($submission->score !== null ? 'graded' : ($submission->is_late ? 'submitted_late' : 'submitted'))
+                    : ($hw->is_overdue ? 'missing_overdue' : 'missing');
+                $hw->can_submit_now = (bool) $hw->is_active;
+                $hw->unsetRelation('submissions');
+            }
+
             return $hw;
         });
 
-        return $this->success(PaginatedResult::fromPaginator($paginated), 'Homework assignments retrieved successfully.');
+        return $this->success(
+            PaginatedResult::fromPaginator($paginated),
+            "{$assessmentConfig['label']} items retrieved successfully."
+        );
     }
 
     /**
@@ -306,6 +464,7 @@ class SubjectClassroomController extends Controller
         $request->validate([
             'class_id'    => 'required|integer|exists:classes,id',
             'subject_id'  => 'required|integer|exists:subjects,id',
+            'assessment_type' => 'nullable|in:homework,assignment,midterm,final',
             'title'       => 'required|string|max:255',
             'description' => 'nullable|string',
             'due_date'    => 'required|date',
@@ -313,21 +472,25 @@ class SubjectClassroomController extends Controller
             'attachment'  => 'nullable|file|max:10240',
         ]);
 
+        $assessmentConfig = $this->assessmentConfig($request->input('assessment_type'));
+        $this->ensureOfficialAssessmentSlotAvailable($assessmentConfig['type'], (int) $request->class_id, (int) $request->subject_id);
+
         $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id);
 
         $data = [
             'class_id'    => $request->class_id,
             'subject_id'  => $request->subject_id,
             'teacher_id'  => $schedule->teacher_id,
+            'assessment_type' => $assessmentConfig['type'],
             'title'       => $request->title,
             'description' => $request->description,
             'due_date'    => $request->due_date,
-            'max_score'   => $request->max_score,
+            'max_score'   => $request->max_score ?? $assessmentConfig['default_max_score'],
             'is_active'   => true,
         ];
 
         if ($request->hasFile('attachment')) {
-            $uploaded = $this->uploadFile($request, 'attachment', 'homework');
+            $uploaded = $this->uploadFile($request, 'attachment', $assessmentConfig['upload_folder']);
             $data['attachment_url']  = $uploaded['url'];
             $data['attachment_name'] = $uploaded['name'];
         }
@@ -335,7 +498,7 @@ class SubjectClassroomController extends Controller
         $homework = HomeworkAssignment::create($data);
         $homework->load(['teacher:id,first_name,last_name', 'subject:id,name', 'classroom:id,name']);
 
-        return $this->success($homework, 'Homework assignment created successfully.');
+        return $this->success($homework, "{$assessmentConfig['label']} created successfully.");
     }
 
     /**
@@ -344,6 +507,7 @@ class SubjectClassroomController extends Controller
     public function updateHomework(Request $request, $id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
         $this->guardCanManageClassSubject($request, $homework->class_id, $homework->subject_id);
 
         $request->validate([
@@ -358,7 +522,7 @@ class SubjectClassroomController extends Controller
         $homework->fill($request->only(['title', 'description', 'due_date', 'max_score', 'is_active']));
 
         if ($request->hasFile('attachment')) {
-            $uploaded = $this->uploadFile($request, 'attachment', 'homework');
+            $uploaded = $this->uploadFile($request, 'attachment', $assessmentConfig['upload_folder']);
             $homework->attachment_url  = $uploaded['url'];
             $homework->attachment_name = $uploaded['name'];
         }
@@ -366,7 +530,7 @@ class SubjectClassroomController extends Controller
         $homework->save();
         $homework->load(['teacher:id,first_name,last_name', 'subject:id,name']);
 
-        return $this->success($homework, 'Homework assignment updated successfully.');
+        return $this->success($homework, "{$assessmentConfig['label']} updated successfully.");
     }
 
     /**
@@ -375,10 +539,12 @@ class SubjectClassroomController extends Controller
     public function destroyHomework($id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
         $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
+        $this->clearAssessmentScoresForAssignment($homework);
         $homework->delete();
 
-        return $this->success(null, 'Homework assignment deleted successfully.');
+        return $this->success(null, "{$assessmentConfig['label']} deleted successfully.");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -393,13 +559,19 @@ class SubjectClassroomController extends Controller
         $homework = HomeworkAssignment::findOrFail($id);
         $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
 
-        $subs = $homework->submissions()
-            ->with('student:id,full_name_en,full_name_kh,id_card_number')
+        $subsQuery = $homework->submissions()
+            ->with('student:id,full_name_en,full_name_kh,id_card_number');
+
+        if ($this->supportsHomeworkReviewState()) {
+            $subsQuery->orderByRaw('CASE WHEN reviewed_at IS NULL THEN 0 ELSE 1 END');
+        }
+
+        $subs = $subsQuery
             ->latest('submitted_at')
             ->get();
 
         return $this->success([
-            'homework' => $homework->only(['id', 'title', 'due_date', 'max_score']),
+            'homework' => $homework->only(['id', 'title', 'due_date', 'max_score', 'assessment_type']),
             'submissions' => $subs,
         ], 'Submissions retrieved successfully.');
     }
@@ -411,6 +583,11 @@ class SubjectClassroomController extends Controller
     public function submitHomework(Request $request, $id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
+        $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
+
+        if (!$homework->is_active) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, "This {$assessmentConfig['type']} is closed for submissions.");
+        }
 
         $request->validate([
             'file' => 'required|file|max:10240',
@@ -444,9 +621,18 @@ class SubjectClassroomController extends Controller
             'note'         => $request->note,
             'submitted_at' => $now,
             'is_late'      => $isLate,
+            'score'        => null,
+            'feedback'     => null,
         ];
 
+        if ($this->supportsHomeworkReviewState()) {
+            $submissionData['reviewed_at'] = null;
+        }
+
         if ($existing) {
+            if ($existing->score !== null || $existing->feedback !== null) {
+                $this->syncAssessmentScore($existing, null);
+            }
             $existing->update($submissionData);
             $submission = $existing;
         } else {
@@ -455,7 +641,12 @@ class SubjectClassroomController extends Controller
 
         $submission->load('student:id,full_name_en,full_name_kh');
 
-        return $this->success($submission, $existing ? 'Homework re-submitted successfully.' : 'Homework submitted successfully.');
+        return $this->success(
+            $submission,
+            $existing
+                ? "{$assessmentConfig['label']} re-submitted successfully."
+                : "{$assessmentConfig['label']} submitted successfully."
+        );
     }
 
     /**
@@ -465,6 +656,7 @@ class SubjectClassroomController extends Controller
     {
         $submission = HomeworkSubmission::findOrFail($id);
         $submission->loadMissing('assignment');
+        $assessmentConfig = $this->assessmentConfig($submission->assignment?->assessment_type);
         $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id);
 
         $request->validate([
@@ -472,17 +664,48 @@ class SubjectClassroomController extends Controller
             'feedback' => 'nullable|string',
         ]);
 
-        $submission->update([
+        $payload = [
             'score'    => $request->score,
             'feedback' => $request->feedback,
-        ]);
+        ];
+
+        if ($this->supportsHomeworkReviewState()) {
+            $payload['reviewed_at'] = Carbon::now();
+        }
+
+        $submission->update($payload);
+        $this->syncAssessmentScore($submission, (float) $request->score);
 
         $submission->load('student:id,full_name_en,full_name_kh');
 
-        return $this->success($submission, 'Submission graded successfully.');
+        return $this->success($submission, "{$assessmentConfig['label']} submission graded successfully.");
     }
 
     // ─── Identity Resolvers ───────────────────────────────────────────────
+
+    /**
+     * PATCH /subject-classroom/submissions/{id}/review
+     */
+    public function reviewSubmission(Request $request, $id)
+    {
+        $submission = HomeworkSubmission::findOrFail($id);
+        $submission->loadMissing('assignment');
+        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id);
+
+        if (!$this->supportsHomeworkReviewState()) {
+            $submission->load('student:id,full_name_en,full_name_kh');
+            return $this->success($submission, 'Submission review tracking is not available until the database migration is applied.');
+        }
+
+        if (!$submission->reviewed_at) {
+            $submission->reviewed_at = Carbon::now();
+            $submission->save();
+        }
+
+        $submission->load('student:id,full_name_en,full_name_kh');
+
+        return $this->success($submission, 'Submission marked as reviewed.');
+    }
 
     private function resolveActor(Request $request): array
     {
