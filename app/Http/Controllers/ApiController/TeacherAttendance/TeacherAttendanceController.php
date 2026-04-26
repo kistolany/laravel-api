@@ -19,19 +19,27 @@ class TeacherAttendanceController extends Controller
     // GET /teacher-attendances?date=YYYY-MM-DD
     public function index(Request $request): JsonResponse
     {
-        $date = $request->query('date', now()->toDateString());
+        $date      = $request->query('date', now()->toDateString());
+        $authTeacherId = Auth::user()?->teacher_id;
+
+        $teacherQuery = Teacher::query()
+            ->select('id', 'teacher_id', 'first_name', 'last_name', 'gender', 'position', 'major_id', 'subject_id', 'image')
+            ->with(['major:id,name', 'subject:id,name'])
+            ->orderBy('first_name');
+
+        // If the authenticated user is a teacher, scope to their own record only
+        if ($authTeacherId) {
+            $teacherQuery->where('id', $authTeacherId);
+        }
+
+        $teacherModels = $teacherQuery->get();
 
         $attendanceRecords = TeacherAttendance::query()
             ->select('id', 'teacher_id', 'status', 'check_in_time', 'check_out_time', 'note')
             ->where('attendance_date', $date)
+            ->whereIn('teacher_id', $teacherModels->pluck('id'))
             ->get()
             ->keyBy('teacher_id');
-
-        $teacherModels = Teacher::query()
-            ->select('id', 'teacher_id', 'first_name', 'last_name', 'gender', 'position', 'major_id', 'subject_id', 'image')
-            ->with(['major:id,name', 'subject:id,name'])
-            ->orderBy('first_name')
-            ->get();
 
         $teachers = $teacherModels
             ->map(function (Teacher $t) use ($attendanceRecords) {
@@ -77,6 +85,19 @@ class TeacherAttendanceController extends Controller
             'records.*.check_out_time' => 'nullable|date_format:H:i',
             'records.*.note'           => 'nullable|string|max:255',
         ]);
+
+        $authTeacherId = Auth::user()?->teacher_id;
+
+        // Teachers may only save their own attendance record
+        if ($authTeacherId) {
+            $unauthorized = collect($data['records'])
+                ->filter(fn($r) => (int) $r['teacher_id'] !== (int) $authTeacherId)
+                ->isNotEmpty();
+
+            if ($unauthorized) {
+                return response()->json(['message' => 'You can only manage your own attendance.'], 403);
+            }
+        }
 
         $userId = Auth::id();
         $now    = now();
@@ -139,11 +160,18 @@ class TeacherAttendanceController extends Controller
         $from = $request->query('from', now()->startOfMonth()->toDateString());
         $to   = $request->query('to',   now()->toDateString());
 
-        $teachers = Teacher::query()
+        $authTeacherId = Auth::user()?->teacher_id;
+
+        $teacherQuery = Teacher::query()
             ->select('id', 'first_name', 'last_name', 'position', 'major_id', 'image')
             ->with(['major:id,name'])
-            ->orderBy('first_name')
-            ->get();
+            ->orderBy('first_name');
+
+        if ($authTeacherId) {
+            $teacherQuery->where('id', $authTeacherId);
+        }
+
+        $teachers = $teacherQuery->get();
 
         $records = TeacherAttendance::query()
             ->select('teacher_id', 'attendance_date', 'status')

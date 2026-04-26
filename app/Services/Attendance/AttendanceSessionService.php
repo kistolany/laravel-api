@@ -79,18 +79,43 @@ class AttendanceSessionService
             $session = $this->detailQuery()
                 ->where('teacher_id', $teacher->id)
                 ->find($id);
-            
+
             if (!$session) {
                 return $this->errorResponse(404, 'Attendance session not found.');
             }
-            
+
             return $this->successResponse(
                 200,
                 'Attendance session retrieved successfully.',
                 (new AttendanceSessionDetailResource($this->mapDetail($session)))->toArray(request())
             );
-            
-            
+        });
+    }
+
+    public function buildTeacherListResponse(Teacher $teacher): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($teacher): array {
+            $sessions = AttendanceSession::with(['classroom', 'subject', 'major', 'shift'])
+                ->where('teacher_id', $teacher->id)
+                ->orderByDesc('session_date')
+                ->orderByDesc('session_number')
+                ->orderByDesc('id')
+                ->get()
+                ->map(fn (AttendanceSession $s) => [
+                    'id'             => $s->id,
+                    'class_id'       => $s->class_id,
+                    'class_name'     => $s->classroom?->name ?? $s->classroom?->code ?? '—',
+                    'subject_id'     => $s->subject_id,
+                    'subject_name'   => $s->subject?->name_eg ?? $s->subject?->name_kh ?? '—',
+                    'session_date'   => $this->formatDate($s->session_date),
+                    'session_number' => (int) $s->session_number,
+                    'major_name'     => $s->major?->name_eg ?? $s->major?->name_kh ?? '—',
+                    'shift_name'     => $s->shift?->name ?? '—',
+                    'created_at'     => $s->created_at?->toIso8601String(),
+                ])
+                ->all();
+
+            return $this->successResponse(200, 'Attendance sessions retrieved successfully.', $sessions);
         });
     }
 

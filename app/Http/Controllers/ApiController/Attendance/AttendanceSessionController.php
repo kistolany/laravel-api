@@ -10,6 +10,7 @@ use App\Services\Attendance\AttendanceSessionService;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class AttendanceSessionController extends Controller
 {
@@ -20,13 +21,34 @@ class AttendanceSessionController extends Controller
 
     public function index(): JsonResponse
     {
-        $response = $this->service->buildListResponse();
+        $teacherId = Auth::user()?->teacher_id;
+
+        if ($teacherId) {
+            $teacher = \App\Models\Teacher::find($teacherId);
+            if (!$teacher) {
+                return response()->json(['data' => []], 200);
+            }
+            $response = $this->service->buildTeacherListResponse($teacher);
+        } else {
+            $response = $this->service->buildListResponse();
+        }
+
         return response()->json($response['payload'], $response['status']);
     }
 
     public function show(int $id): JsonResponse
     {
-        $response = $this->service->buildDetailResponse($id);
+        $teacherId = Auth::user()?->teacher_id;
+
+        if ($teacherId) {
+            $teacher = \App\Models\Teacher::find($teacherId);
+            if (!$teacher) {
+                return response()->json(['message' => 'Teacher profile not found.'], 404);
+            }
+            $response = $this->service->buildTeacherDetailResponse($teacher, $id);
+        } else {
+            $response = $this->service->buildDetailResponse($id);
+        }
 
         return response()->json($response['payload'], $response['status']);
     }
@@ -61,7 +83,15 @@ class AttendanceSessionController extends Controller
 
     public function store(AttendanceSessionRequest $request): JsonResponse
     {
-        $response = $this->service->createSessionResponse($request->validated());
+        $validated  = $request->validated();
+        $teacherId  = Auth::user()?->teacher_id;
+
+        // Force teacher_id to the authenticated teacher's own profile
+        if ($teacherId) {
+            $validated['teacher_id'] = $teacherId;
+        }
+
+        $response = $this->service->createSessionResponse($validated);
 
         return response()->json($response['payload'], $response['status']);
     }
