@@ -556,12 +556,13 @@ class StudentService extends BaseService
 
     private function temporaryStudentCode(): string
     {
-        return 'TMP-STU-' . now()->format('YmdHisv') . '-' . str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        // Temporary placeholder — replaced by generateStudentCode() right after insert
+        return 'B-TMP-' . now()->format('YmdHisv');
     }
 
     private function generateStudentCode(int $studentId): string
     {
-        return 'STU-' . str_pad((string) $studentId, 6, '0', STR_PAD_LEFT);
+        return 'B' . str_pad((string) $studentId, 5, '0', STR_PAD_LEFT);
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\AttendanceRecord;
 use App\Models\AttendanceSession;
 use App\Models\Classes;
 use App\Models\ClassProgram;
+use App\Models\MajorSubject;
 use App\Models\ClassSchedule;
 use App\Models\ClassStudent;
 use App\Models\Commune;
@@ -69,6 +70,20 @@ class DemoDataSeeder extends Seeder
                 ['name' => $sName],
                 ['subject_Code' => Str::upper(Str::random(5))]
             );
+        }
+
+        // 4b. Assign all subjects to all majors for Year 1, Semester 1
+        $allMajors   = Major::all();
+        $allSubjects = Subject::all();
+        foreach ($allMajors as $maj) {
+            foreach ($allSubjects as $sub) {
+                MajorSubject::firstOrCreate([
+                    'major_id'   => $maj->id,
+                    'subject_id' => $sub->id,
+                    'year_level' => 1,
+                    'semester'   => 1,
+                ]);
+            }
         }
 
         // 5. Shifts
@@ -146,7 +161,7 @@ class DemoDataSeeder extends Seeder
                     'dob' => '2005-01-' . str_pad($num, 2, '0', STR_PAD_LEFT),
                     'phone' => '09988776' . str_pad($num, 2, '0', STR_PAD_LEFT),
                     'email' => 'student' . $num . '@example.com',
-                    'id_card_number' => 'STU-' . str_pad((string) $num, 6, '0', STR_PAD_LEFT),
+                    'id_card_number' => 'B' . str_pad((string) $num, 5, '0', STR_PAD_LEFT),
                     'student_type' => $type,
                     'status' => 'active',
                     'bacll_code' => 'B' . str_pad((string) $num, 5, '0', STR_PAD_LEFT),
@@ -337,7 +352,7 @@ class DemoDataSeeder extends Seeder
                     'dob' => '2006-11-11',
                     'phone' => "0127788" . $index,
                     'email' => "waiting_list" . $index . "@example.com",
-                    'id_card_number' => "ID-WAIT-" . str_pad($index, 4, '0', STR_PAD_LEFT),
+                    'id_card_number' => "B" . str_pad($index + 50, 5, '0', STR_PAD_LEFT),
                     'student_type' => $data['type'],
                     'status' => 'active',
                     'bacll_code' => "B" . str_pad($index + 50, 5, '0', STR_PAD_LEFT),

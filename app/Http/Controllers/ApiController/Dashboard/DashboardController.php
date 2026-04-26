@@ -9,12 +9,132 @@ use App\Models\Major;
 use App\Models\Students;
 use App\Models\Subject;
 use App\Models\Teacher;
+use App\Models\TeacherAttendance;
 use App\Traits\ApiResponseTrait;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
     use ApiResponseTrait;
+
+    public function teacherStats(Request $request)
+    {
+        $user      = $request->user();
+        $teacherId = $user?->teacher_id;
+
+        if (!$teacherId) {
+            return $this->success([
+                'teacher_id'       => null,
+                'total_classes'    => 0,
+                'total_subjects'   => 0,
+                'total_schedules'  => 0,
+                'today_schedules'  => [],
+                'week_schedules'   => [],
+                'today'            => now()->format('l'),
+            ]);
+        }
+
+        // ── Counts for this teacher ───────────────────────────────────
+        $totalClasses = ClassSchedule::where('teacher_id', $teacherId)
+            ->distinct('class_id')
+            ->count('class_id');
+
+        $totalSubjects = ClassSchedule::where('teacher_id', $teacherId)
+            ->distinct('subject_id')
+            ->count('subject_id');
+
+        $totalSchedules = ClassSchedule::where('teacher_id', $teacherId)->count();
+
+        // ── Today's schedules for this teacher ────────────────────────
+        $todayName = now()->format('l');
+        $todaySchedules = DB::table('class_schedules')
+            ->join('classes', 'class_schedules.class_id', '=', 'classes.id')
+            ->leftJoin('subjects', 'class_schedules.subject_id', '=', 'subjects.id')
+            ->leftJoin('shifts', 'class_schedules.shift_id', '=', 'shifts.id')
+            ->where('class_schedules.teacher_id', $teacherId)
+            ->where('class_schedules.day_of_week', $todayName)
+            ->select(
+                'class_schedules.id',
+                'classes.name as class_name',
+                'subjects.name as subject_name',
+                'shifts.name as shift_name',
+                'class_schedules.room',
+                'class_schedules.day_of_week',
+                'class_schedules.year_level',
+                'class_schedules.semester',
+            )
+            ->orderBy('shifts.name')
+            ->get();
+
+        // ── Full week schedule for this teacher ───────────────────────
+        $weekSchedules = DB::table('class_schedules')
+            ->join('classes', 'class_schedules.class_id', '=', 'classes.id')
+            ->leftJoin('subjects', 'class_schedules.subject_id', '=', 'subjects.id')
+            ->leftJoin('shifts', 'class_schedules.shift_id', '=', 'shifts.id')
+            ->where('class_schedules.teacher_id', $teacherId)
+            ->select(
+                'class_schedules.id',
+                'classes.name as class_name',
+                'subjects.name as subject_name',
+                'shifts.name as shift_name',
+                'class_schedules.room',
+                'class_schedules.day_of_week',
+                'class_schedules.year_level',
+                'class_schedules.semester',
+            )
+            ->orderByRaw("FIELD(class_schedules.day_of_week,'Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')")
+            ->orderBy('shifts.name')
+            ->get();
+
+        // ── Sessions per day breakdown ────────────────────────────────
+        $byDay = $weekSchedules
+            ->groupBy('day_of_week')
+            ->map(fn ($items) => $items->count())
+            ->toArray();
+
+        // ── Teacher attendance this month ─────────────────────────────
+        $monthStart = now()->startOfMonth();
+        $monthEnd   = now()->endOfMonth();
+
+        $attendanceThisMonth = TeacherAttendance::where('teacher_id', $teacherId)
+            ->whereBetween('attendance_date', [$monthStart, $monthEnd])
+            ->select('attendance_date', 'status', 'check_in_time', 'check_out_time')
+            ->orderBy('attendance_date')
+            ->get();
+
+        $attendanceCounts = [
+            'present' => $attendanceThisMonth->where('status', 'Present')->count(),
+            'absent'  => $attendanceThisMonth->where('status', 'Absent')->count(),
+            'late'    => $attendanceThisMonth->where('status', 'Late')->count(),
+            'leave'   => $attendanceThisMonth->where('status', 'Leave')->count(),
+            'total'   => $attendanceThisMonth->count(),
+        ];
+
+        // Last 14 days strip (for the mini chart)
+        $recentAttendance = TeacherAttendance::where('teacher_id', $teacherId)
+            ->whereBetween('attendance_date', [now()->subDays(13)->startOfDay(), now()->endOfDay()])
+            ->select('attendance_date', 'status')
+            ->orderBy('attendance_date')
+            ->get()
+            ->map(fn ($r) => [
+                'date'   => $r->attendance_date,
+                'status' => $r->status,
+            ]);
+
+        return $this->success([
+            'teacher_id'         => $teacherId,
+            'total_classes'      => $totalClasses,
+            'total_subjects'     => $totalSubjects,
+            'total_schedules'    => $totalSchedules,
+            'today_schedules'    => $todaySchedules,
+            'week_schedules'     => $weekSchedules,
+            'by_day'             => $byDay,
+            'today'              => $todayName,
+            'attendance_month'   => $attendanceCounts,
+            'attendance_recent'  => $recentAttendance,
+        ]);
+    }
 
     public function stats()
     {

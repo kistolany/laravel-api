@@ -107,6 +107,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth.jwt')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'stats']);
+        Route::get('dashboard/teacher-stats', [DashboardController::class, 'teacherStats']);
 
         // Teacher Attendance routes
         Route::get('teacher-attendances',         [TeacherAttendanceController::class, 'index'])->middleware('permission:teacher_attendance.view');

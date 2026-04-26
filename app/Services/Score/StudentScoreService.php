@@ -66,6 +66,16 @@ class StudentScoreService extends BaseService
                     : (int) filter_var($filters['stage'], FILTER_SANITIZE_NUMBER_INT))
                 : null;
 
+            // When class_id is given but year/semester were not selected, derive them from the class row
+            if ($filters['class_id'] && (!$gbYearInt || !$filters['semester'])) {
+                $classRow = Classes::find($filters['class_id']);
+                if ($classRow) {
+                    $gbYearInt          = $gbYearInt          ?? ($classRow->year_level ? (int) $classRow->year_level : null);
+                    $filters['stage']   = $filters['stage']   ?? ($classRow->year_level ? (string) $classRow->year_level : null);
+                    $filters['semester']= $filters['semester'] ?? ($classRow->semester   ? (string) $classRow->semester  : null);
+                }
+            }
+
             // ── 1. Resolve subjects for this major/year/semester ───────────────
             $subjects   = $this->resolveGradeBookSubjects($filters, $gbYearInt);
             $subjectIds = $subjects->pluck('id');
@@ -77,6 +87,7 @@ class StudentScoreService extends BaseService
                     'academicInfo.major',
                     'academicInfo.shift',
                     'classes',
+                    'classes.major',
                     'classes.programs',
                     'scores' => function ($q) use ($subjectIds, $filters, $gbYearInt) {
                         // Only load scores for these subjects; no filter = load all
@@ -97,7 +108,9 @@ class StudentScoreService extends BaseService
                 $academic = $student->academicInfo;
                 $class    = $this->resolveClass($student, $filters, null);
                 $program  = $this->resolveProgram($class, $filters);
-                $major    = $academic?->major ?? $program?->major;
+                // Prefer the class's own major (most reliable when student was found
+                // via class enrollment rather than academic_info major match)
+                $major    = $class?->major ?? $academic?->major ?? $program?->major;
 
                 $yearInt = isset($filters['stage']) && $filters['stage']
                     ? (is_numeric($filters['stage'])
@@ -112,12 +125,15 @@ class StudentScoreService extends BaseService
                 $scoreMap = $subjects->mapWithKeys(function ($subject) use ($scoresBySubject) {
                     $score = $scoresBySubject->get($subject->id);
                     return [$subject->id => [
-                        'score_id'         => $score?->id,
-                        'class_score'      => (float) ($score?->class_score      ?? 0),
-                        'assignment_score' => (float) ($score?->assignment_score ?? 0),
-                        'midterm_score'    => (float) ($score?->midterm_score    ?? 0),
-                        'final_score'      => (float) ($score?->final_score      ?? 0),
-                        'total'            => round((float) ($score?->total ?? 0), 2),
+                        'score_id'                => $score?->id,
+                        'class_score'             => (float) ($score?->class_score      ?? 0),
+                        'assignment_score'        => (float) ($score?->assignment_score ?? 0),
+                        'assignment_score_source' => $score?->assignment_score_source,
+                        'midterm_score'           => (float) ($score?->midterm_score    ?? 0),
+                        'midterm_score_source'    => $score?->midterm_score_source,
+                        'final_score'             => (float) ($score?->final_score      ?? 0),
+                        'final_score_source'      => $score?->final_score_source,
+                        'total'                   => round((float) ($score?->total ?? 0), 2),
                     ]];
                 })->all();
 
@@ -157,44 +173,52 @@ class StudentScoreService extends BaseService
     {
         $hasClassId = !empty($filters['class_id']);
         $hasMajorId = !empty($filters['major_id']);
+        $hasAnyFilter = $hasClassId || $hasMajorId || !empty($filters['stage']) || !empty($filters['semester']);
 
         return Students::query()
-            ->whereIn('student_type', ['PAY', 'PASS'])
-            // class enrollment filter
+            ->whereIn('student_type', ['PAY', 'PASS', 'PENDING'])
+
+            // ── When class_id is given: class enrollment is the sole authority.
             ->when($hasClassId, fn (Builder $q) =>
                 $q->whereHas('classes', fn (Builder $cq) => $cq->where('classes.id', $filters['class_id']))
             )
-            // major filter — always match student's OWN academicInfo.major_id
-            ->when($hasMajorId, fn (Builder $q) =>
-                $q->whereHas('academicInfo', fn (Builder $aq) => $aq->where('major_id', $filters['major_id']))
-            )
-            // year filter — match academicInfo.stage OR enrolled class's programs
-            ->when($yearInt, function (Builder $q) use ($filters, $yearInt, $hasClassId) {
-                if ($hasClassId) {
-                    $classId = $filters['class_id'];
-                    $q->whereHas('classes', fn (Builder $cq) =>
-                        $cq->where('classes.id', $classId)
-                           ->whereHas('programs', fn (Builder $pq) => $pq->where('year_level', $yearInt))
-                    );
-                } else {
-                    $q->where(function (Builder $sq) use ($filters, $yearInt) {
-                        $sq->whereHas('academicInfo', fn (Builder $aq) => $aq->where('stage', $filters['stage']))
-                           ->orWhereHas('classes.programs', fn (Builder $pq) => $pq->where('year_level', $yearInt));
+
+            // ── When only major/year/semester are given (no class_id): accept a
+            //    student if EITHER their academic_info matches OR they are enrolled
+            //    in a class that belongs to the requested major/year/semester.
+            ->when(!$hasClassId && $hasMajorId, function (Builder $q) use ($filters, $yearInt) {
+                $q->where(function (Builder $sq) use ($filters, $yearInt) {
+                    $sq->whereHas('academicInfo', function (Builder $aq) use ($filters, $yearInt) {
+                        $aq->where('major_id', $filters['major_id']);
+                        if ($yearInt) {
+                            $aq->where('stage', $filters['stage']);
+                        }
+                    })
+                    ->orWhereHas('classes', function (Builder $cq) use ($filters, $yearInt) {
+                        $cq->where('major_id', $filters['major_id']);
+                        if ($yearInt) {
+                            $cq->where('year_level', $yearInt);
+                        }
+                        if ($filters['semester']) {
+                            $cq->where('semester', $filters['semester']);
+                        }
                     });
-                }
+                });
             })
-            // semester filter — match enrolled class's programs
-            ->when($filters['semester'], function (Builder $q) use ($filters, $hasClassId) {
-                if ($hasClassId) {
-                    $classId = $filters['class_id'];
-                    $q->whereHas('classes', fn (Builder $cq) =>
-                        $cq->where('classes.id', $classId)
-                           ->whereHas('programs', fn (Builder $pq) => $pq->where('semester', $filters['semester']))
+
+            // ── Semester filter when no class_id and no major_id
+            ->when(!$hasClassId && $filters['semester'] && !$hasMajorId, fn (Builder $q) =>
+                $q->where(function (Builder $sq) use ($filters, $yearInt) {
+                    $sq->whereHas('classes', function (Builder $cq) use ($filters, $yearInt) {
+                        $cq->where('semester', $filters['semester']);
+                        if ($yearInt) $cq->where('year_level', $yearInt);
+                    })
+                    ->orWhereHas('classes.programs', fn (Builder $pq) =>
+                        $pq->where('semester', $filters['semester'])
                     );
-                } else {
-                    $q->whereHas('classes.programs', fn (Builder $pq) => $pq->where('semester', $filters['semester']));
-                }
-            })
+                })
+            )
+
             ->when($filters['search'], function (Builder $q, string $search) {
                 $q->where(function (Builder $sq) use ($search) {
                     $sq->where('full_name_kh', 'like', "%{$search}%")
@@ -209,27 +233,27 @@ class StudentScoreService extends BaseService
         $majorId  = $filters['major_id'];
         $semester = $filters['semester'];
 
-        // If class_id set but filters are incomplete, derive from class programs
+        // If class_id set but filters are incomplete, derive from class (direct columns first, then programs)
         if ($filters['class_id'] && (!$majorId || !$yearInt || !$semester)) {
             $class = Classes::with('programs')->find($filters['class_id']);
             if ($class) {
                 $program  = $this->resolveProgram($class, $filters);
-                $majorId  = $majorId  ?? $program?->major_id;
-                $yearInt  = $yearInt  ?? ($program ? (int) $program->year_level : null);
-                $semester = $semester ?? ($program ? (string) $program->semester : null);
+                $majorId  = $majorId  ?? $program?->major_id  ?? $class->major_id;
+                $yearInt  = $yearInt  ?? ($program ? (int) $program->year_level : null) ?? ($class->year_level ? (int) $class->year_level : null);
+                $semester = $semester ?? ($program ? (string) $program->semester : null) ?? ($class->semester ? (string) $class->semester : null);
             }
         }
 
-        // Need at least a major to look up subjects
-        if (!$majorId) return collect();
-
         return Subject::query()
-            ->whereIn('id', MajorSubject::query()
-                ->where('major_id', $majorId)
-                ->when($yearInt,  fn ($q) => $q->where('year_level', $yearInt))
-                ->when($semester, fn ($q) => $q->where('semester', $semester))
-                ->select('subject_id')
+            ->when($majorId, fn ($q) =>
+                $q->whereIn('id', MajorSubject::query()
+                    ->where('major_id', $majorId)
+                    ->when($yearInt,  fn ($q) => $q->where('year_level', $yearInt))
+                    ->when($semester, fn ($q) => $q->where('semester', $semester))
+                    ->select('subject_id')
+                )
             )
+            ->when($filters['subject_id'], fn ($q, int $subjectId) => $q->where('id', $subjectId))
             ->orderBy('subject_Code')
             ->orderBy('name')
             ->get();
@@ -251,7 +275,6 @@ class StudentScoreService extends BaseService
                         ->with(['subject', 'class'])
                         ->latest('updated_at'),
                 ])
-                ->whereHas('scores', fn (Builder $query) => $this->applyScoreFilters($query, $filters))
                 ->orderBy('full_name_en')
                 ->get();
 
@@ -396,12 +419,28 @@ class StudentScoreService extends BaseService
                         'semester' => $record['semester'] ?? ($class?->semester ? (string) $class->semester : null),
                     ];
 
-                    $score = StudentScore::updateOrCreate($context, [
+                    $updates = [
                         'class_score' => $this->scoreValue($record['class_score'] ?? 0),
                         'assignment_score' => $this->scoreValue($record['assignment_score'] ?? 0),
+                        'assignment_score_source' => null,
                         'midterm_score' => $this->scoreValue($record['midterm_score'] ?? 0),
+                        'midterm_score_source' => null,
                         'final_score' => $this->scoreValue($record['final_score'] ?? 0),
-                    ]);
+                        'final_score_source' => null,
+                    ];
+
+                    // Only update fields that were explicitly provided in the request
+                    if (!array_key_exists('assignment_score', $record)) {
+                        unset($updates['assignment_score'], $updates['assignment_score_source']);
+                    }
+                    if (!array_key_exists('midterm_score', $record)) {
+                        unset($updates['midterm_score'], $updates['midterm_score_source']);
+                    }
+                    if (!array_key_exists('final_score', $record)) {
+                        unset($updates['final_score'], $updates['final_score_source']);
+                    }
+
+                    $score = StudentScore::updateOrCreate($context, $updates);
 
                     $saved[] = $score->load(['student', 'class', 'subject']);
                 }
@@ -442,7 +481,7 @@ class StudentScoreService extends BaseService
             : null;
 
         return Students::query()
-            ->whereIn('student_type', ['PAY', 'PASS'])
+            ->whereIn('student_type', ['PAY', 'PASS', 'PENDING'])
             ->when($filters['search'], function (Builder $query, string $search) {
                 $query->where(function (Builder $subQuery) use ($search) {
                     $subQuery->where('full_name_kh', 'like', "%{$search}%")
@@ -805,12 +844,30 @@ class StudentScoreService extends BaseService
     {
         $classes = $student->relationLoaded('classes') ? $student->classes : collect();
 
+        // Exact class filter — always wins
         if ($filters['class_id']) {
             return $classes->firstWhere('id', $filters['class_id']);
         }
 
+        // Score already points to a class — use it if loaded
         if ($score?->class_id) {
             return $classes->firstWhere('id', $score->class_id) ?? $score->class;
+        }
+
+        // No class_id filter: find the enrolled class that best matches major/year/semester
+        if ($filters['major_id']) {
+            $yearInt = isset($filters['stage']) && $filters['stage']
+                ? (int) filter_var($filters['stage'], FILTER_SANITIZE_NUMBER_INT)
+                : null;
+
+            $match = $classes->first(function (Classes $cls) use ($filters, $yearInt) {
+                if ((int) $cls->major_id !== (int) $filters['major_id']) return false;
+                if ($yearInt && (int) $cls->year_level !== $yearInt) return false;
+                if ($filters['semester'] && (string) $cls->semester !== (string) $filters['semester']) return false;
+                return true;
+            });
+
+            if ($match) return $match;
         }
 
         return $classes->first();

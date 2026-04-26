@@ -125,6 +125,7 @@ class SubjectClassroomController extends Controller
 
         $scoreRecord ??= new StudentScore($context);
         $scoreRecord->{$scoreField} = $score;
+        $scoreRecord->{$scoreField . '_source'} = $score !== null ? 'classroom' : null;
         $scoreRecord->save();
     }
 

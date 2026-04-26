@@ -18,9 +18,9 @@ class RoleAssignPermissionsRequest extends FormRequest
         $knownPermissionNames = RbacPermissionCatalog::all();
 
         return [
-            'permission_ids' => ['nullable', 'array', 'min:1'],
+            'permission_ids' => ['nullable', 'array'],
             'permission_ids.*' => ['integer', 'exists:permissions,id'],
-            'permissions' => ['nullable', 'array', 'min:1'],
+            'permissions' => ['nullable', 'array'],
             'permissions.*' => ['string', Rule::in($knownPermissionNames)],
             'mode' => ['nullable', 'in:add,sync'],
         ];

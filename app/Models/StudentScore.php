@@ -16,8 +16,11 @@ class StudentScore extends Model
         'semester',
         'class_score',
         'assignment_score',
+        'assignment_score_source',
         'midterm_score',
+        'midterm_score_source',
         'final_score',
+        'final_score_source',
     ];
 
     protected $casts = [
