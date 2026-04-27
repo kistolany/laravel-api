@@ -162,6 +162,15 @@ final class RbacPermissionCatalog
             'report_teacher_workload.view',
             'report_graduation.view',
             'report_reexam.view',
+
+            'holiday.view',
+            'holiday.create',
+            'holiday.update',
+            'holiday.delete',
+
+            'notification.view',
+            'notification.create',
+            'notification.delete',
         ];
     }
 

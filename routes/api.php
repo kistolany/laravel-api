@@ -28,6 +28,8 @@ use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\Chat\ChatController;
+use App\Http\Controllers\ApiController\Holiday\HolidayController;
+use App\Http\Controllers\ApiController\Notification\NotificationController;
 use App\Http\Controllers\ApiController\StaffAttendance\StaffAttendanceController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use App\Http\Controllers\ApiController\SubjectClassroom\SubjectClassroomController;
@@ -199,6 +201,24 @@ Route::prefix('v1')->group(function () {
         Route::post('leave-requests', [LeaveRequestController::class, 'store'])->middleware('permission:leave_request.create');
         Route::patch('leave-requests/{id}/status', [LeaveRequestController::class, 'updateStatus'])->middleware('permission:leave_request.approve');
         Route::delete('leave-requests/{id}', [LeaveRequestController::class, 'destroy'])->middleware('permission:leave_request.delete');
+
+        // Holiday routes
+        Route::get('holidays', [HolidayController::class, 'index'])->middleware('permission:holiday.view');
+        Route::post('holidays', [HolidayController::class, 'store'])->middleware('permission:holiday.create');
+        Route::put('holidays/{id}', [HolidayController::class, 'update'])->middleware('permission:holiday.update');
+        Route::delete('holidays/{id}', [HolidayController::class, 'destroy'])->middleware('permission:holiday.delete');
+        Route::get('holidays/{id}/document', [HolidayController::class, 'downloadDocument']);
+
+        // Public holiday calendar — any authenticated user can view
+        Route::get('public-holidays', [HolidayController::class, 'publicIndex']);
+
+        // Notification routes (admin manage — requires permission)
+        Route::get('notifications', [NotificationController::class, 'index'])->middleware('permission:notification.view');
+        Route::post('notifications', [NotificationController::class, 'store'])->middleware('permission:notification.create');
+        Route::delete('notifications/{id}', [NotificationController::class, 'destroy'])->middleware('permission:notification.delete');
+
+        // Public notification feed — any authenticated user can poll this
+        Route::get('user-notifications', [NotificationController::class, 'feed']);
 
         // Chat / Messaging
         Route::prefix('chat')->group(function () {
