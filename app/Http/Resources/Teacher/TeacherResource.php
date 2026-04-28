@@ -10,6 +10,9 @@ class TeacherResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $username = (string) $this->username;
+        $publicUsername = str_starts_with($username, 'teacher-profile-') ? null : $this->username;
+
         return [
             // identity
             'id'             => $this->id,
@@ -26,7 +29,7 @@ class TeacherResource extends JsonResource
             'national_id'    => $this->national_id,
             // contact
             'email'          => $this->email,
-            'username'       => $this->username,
+            'username'       => $publicUsername,
             'phone_number'   => $this->phone_number,
             'telegram'       => $this->telegram,
             'address'        => $this->address,
@@ -47,6 +50,10 @@ class TeacherResource extends JsonResource
             'image_url'      => $this->image ?: null,
             // auth
             'role'           => $this->role,
+            'status'         => $this->status ?: 'active',
+            'deleted_at'     => optional($this->deleted_at)->toDateTimeString(),
+            'deleted_by'     => $this->deleted_by,
+            'delete_reason'  => $this->delete_reason,
             'is_verified'    => (bool) $this->is_verified,
             'verified_at'    => optional($this->verified_at)->toDateTimeString(),
             // relations
@@ -64,5 +71,3 @@ class TeacherResource extends JsonResource
         ];
     }
 }
-
-

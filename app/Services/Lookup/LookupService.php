@@ -484,6 +484,7 @@ class LookupService extends BaseService
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn) {
             return $this->rememberLookup($fn, [], fn () => Teacher::query()
+                ->where('status', 'active')
                 ->select('id', 'first_name', 'last_name')
                 ->orderBy('first_name')
                 ->get()

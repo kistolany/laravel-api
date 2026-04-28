@@ -24,8 +24,10 @@ use App\Http\Controllers\ApiController\Score\StudentScoreController;
 use App\Http\Controllers\ApiController\Student\StudentRegistrationController;
 use App\Http\Controllers\ApiController\Subject\SubjectController;
 use App\Http\Controllers\ApiController\Teacher\TeacherAuthController;
+use App\Http\Controllers\ApiController\Teacher\TeacherAvailabilityController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
+use App\Http\Controllers\ApiController\ClassSchedule\ScheduleProposalController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\Chat\ChatController;
 use App\Http\Controllers\ApiController\Holiday\HolidayController;
@@ -82,20 +84,22 @@ Route::prefix('v1')->group(function () {
             Route::post('logout', [AuthController::class, 'logout']);
             Route::post('logout-all', [AuthController::class, 'logoutAll']);
             Route::post('revoke', [AuthController::class, 'revoke']);
-            Route::get('users', [AuthController::class, 'index'])->middleware('permission:user.view');
-            Route::post('users', [AuthController::class, 'createUser'])->middleware('permission:user.create');
-            Route::post('users/{id}', [AuthController::class, 'updateUser'])->middleware('permission:user.update');
+            Route::get('users', [AuthController::class, 'index'])->middleware('permission:user.view|staff.view');
+            Route::post('users', [AuthController::class, 'createUser'])->middleware('permission:user.create|staff.create');
+            Route::post('users/{id}', [AuthController::class, 'updateUser'])->middleware('permission:user.update|staff.update');
             Route::patch('users/{id}/status', [AuthController::class, 'updateStatus'])->middleware('permission:user.status.update');
-            Route::delete('users/{id}', [AuthController::class, 'destroy'])->middleware('permission:user.delete');
+            Route::delete('users/{id}', [AuthController::class, 'destroy'])->middleware('permission:user.delete|staff.delete');
         });
     });
 
     Route::prefix('teacher-auth')->group(function () {
-        Route::get('list', [TeacherAuthController::class, 'index']);
-        Route::delete('{id}', [TeacherAuthController::class, 'destroy']);
-        Route::post('register', [TeacherAuthController::class, 'register']);
-        Route::post('{id}', [TeacherAuthController::class, 'update']);
+        Route::get('list', [TeacherAuthController::class, 'index'])->middleware('auth.jwt', 'permission:teacher.view|teacher.active.view');
+        Route::get('archived', [TeacherAuthController::class, 'archived'])->middleware('auth.jwt', 'permission:teacher.archive.view');
+        Route::delete('{id}', [TeacherAuthController::class, 'destroy'])->middleware('auth.jwt', 'permission:teacher.delete');
+        Route::patch('{id}/restore', [TeacherAuthController::class, 'restore'])->middleware('auth.jwt', 'permission:teacher.update|teacher.delete');
+        Route::post('register', [TeacherAuthController::class, 'register'])->middleware('auth.jwt', 'permission:teacher.create');
         Route::post('upload-image', [TeacherAuthController::class, 'uploadImage']);
+        Route::post('{id}', [TeacherAuthController::class, 'update'])->middleware('auth.jwt', 'permission:teacher.update|teacher.status.update');
         Route::post('login', [TeacherAuthController::class, 'login'])->middleware('throttle:login');
         Route::post('refresh', [TeacherAuthController::class, 'refresh']);
 
@@ -135,11 +139,13 @@ Route::prefix('v1')->group(function () {
         Route::post('roles/{id}/permissions', [RoleController::class, 'assignPermissions'])->middleware('permission:role.update');
 
         // Student routes
-        Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view');
+        Route::get('students/pay-pass', [StudentController::class, 'payOrPass'])->middleware('permission:student.view|student.active.view');
         Route::get('students/final-exam-list', [StudentController::class, 'finalExamList'])->middleware('permission:student.view');
         Route::get('students/pass', [StudentController::class, 'passStudents'])->middleware('permission:student.view');
         Route::get('students/fail', [StudentController::class, 'failStudents'])->middleware('permission:student.view');
         Route::get('students/pending', [StudentController::class, 'pendingStudents'])->middleware('permission:student.view');
+        Route::get('students/archived', [StudentController::class, 'archived'])->middleware('permission:student.archive.view');
+        Route::patch('students/{id}/restore', [StudentController::class, 'restore'])->middleware('permission:student.update|student.delete');
         Route::apiResource('students', StudentController::class)->only(['index', 'show'])->middleware('permission:student.view');
         Route::apiResource('students', StudentController::class)->only(['store'])->middleware('permission:student.create');
         Route::apiResource('students', StudentController::class)->only(['update'])->middleware('permission:student.update');
@@ -201,6 +207,20 @@ Route::prefix('v1')->group(function () {
         Route::post('leave-requests', [LeaveRequestController::class, 'store'])->middleware('permission:leave_request.create');
         Route::patch('leave-requests/{id}/status', [LeaveRequestController::class, 'updateStatus'])->middleware('permission:leave_request.approve');
         Route::delete('leave-requests/{id}', [LeaveRequestController::class, 'destroy'])->middleware('permission:leave_request.delete');
+
+        // Teacher Availability routes
+        Route::get('teacher-availability',                           [TeacherAvailabilityController::class, 'index']);
+        Route::get('teacher-availability/all-summary',               [TeacherAvailabilityController::class, 'allSummary']);
+        Route::get('teacher-availability/by-teacher/{teacherId}',    [TeacherAvailabilityController::class, 'byTeacher']);
+        Route::post('teacher-availability/sync',                     [TeacherAvailabilityController::class, 'sync']);
+
+        // Schedule Proposals
+        Route::get ('schedule-proposals',                    [ScheduleProposalController::class, 'index']);
+        Route::post('schedule-proposals',                    [ScheduleProposalController::class, 'store']);
+        Route::get ('schedule-proposals/mine',               [ScheduleProposalController::class, 'mine']);
+        Route::post('schedule-proposals/{id}/respond',       [ScheduleProposalController::class, 'respond']);
+        Route::post('schedule-proposals/{id}/resend',        [ScheduleProposalController::class, 'resend']);
+        Route::delete('schedule-proposals/{id}',             [ScheduleProposalController::class, 'destroy']);
 
         // Holiday routes
         Route::get('holidays', [HolidayController::class, 'index'])->middleware('permission:holiday.view');

@@ -22,9 +22,87 @@ class SubjectClassroomController extends Controller
 {
     use ApiResponseTrait;
 
+    private const SUBJECT_CLASSROOM_PERMISSIONS = [
+        'view' => 'subject_classroom.view',
+        'create' => 'subject_classroom.create',
+        'update' => 'subject_classroom.update',
+        'delete' => 'subject_classroom.delete',
+        'submit' => 'subject_classroom.submit',
+        'grade' => 'subject_classroom.grade',
+        'review' => 'subject_classroom.review',
+    ];
+
     private function supportsHomeworkReviewState(): bool
     {
         return Schema::hasColumn('homework_submissions', 'reviewed_at');
+    }
+
+    private function subjectClassroomPermissionsForTeacher(): array
+    {
+        return array_values(array_diff(
+            self::SUBJECT_CLASSROOM_PERMISSIONS,
+            [self::SUBJECT_CLASSROOM_PERMISSIONS['submit']]
+        ));
+    }
+
+    private function subjectClassroomPermissionsForUser(User $user): array
+    {
+        $user->loadMissing('role.permissions');
+
+        return $user->role?->permissions
+            ? $user->role->permissions
+                ->pluck('name')
+                ->map(fn ($name) => strtolower(trim((string) $name)))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all()
+            : [];
+    }
+
+    private function hasSubjectClassroomPermission(array $permissions, string $key): bool
+    {
+        $permission = self::SUBJECT_CLASSROOM_PERMISSIONS[$key] ?? $key;
+
+        return in_array(strtolower($permission), $permissions, true);
+    }
+
+    private function actorCapabilities(array $permissions, bool $canSubmit): array
+    {
+        $canCreate = $this->hasSubjectClassroomPermission($permissions, 'create');
+        $canUpdate = $this->hasSubjectClassroomPermission($permissions, 'update');
+        $canDelete = $this->hasSubjectClassroomPermission($permissions, 'delete');
+        $canGrade = $this->hasSubjectClassroomPermission($permissions, 'grade');
+        $canReview = $this->hasSubjectClassroomPermission($permissions, 'review');
+
+        return [
+            'can_view' => $this->hasSubjectClassroomPermission($permissions, 'view'),
+            'can_manage' => $canCreate || $canUpdate || $canDelete || $canGrade || $canReview,
+            'can_create' => $canCreate,
+            'can_update' => $canUpdate,
+            'can_delete' => $canDelete,
+            'can_submit' => $canSubmit && $this->hasSubjectClassroomPermission($permissions, 'submit'),
+            'can_grade' => $canGrade,
+            'can_review' => $canReview,
+        ];
+    }
+
+    private function actorCanAny(array $actor, array $permissionKeys): bool
+    {
+        foreach ($permissionKeys as $permissionKey) {
+            if (($actor["can_{$permissionKey}"] ?? false) === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function assertActorCan(array $actor, string $permissionKey, string $message): void
+    {
+        if (!$this->actorCanAny($actor, [$permissionKey])) {
+            throw new ApiException(ResponseStatus::FORBIDDEN, $message);
+        }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────
@@ -216,6 +294,8 @@ class SubjectClassroomController extends Controller
     public function options(Request $request)
     {
         $actor = $this->resolveActor($request);
+        $this->assertActorCan($actor, 'view', 'You do not have permission to view subject classroom.');
+
         $query = $this->scheduleOptionQuery();
 
         if ($actor['scope'] === 'teacher') {
@@ -260,8 +340,14 @@ class SubjectClassroomController extends Controller
 
         return $this->success([
             'scope' => $actor['scope'],
+            'can_view' => $actor['can_view'],
             'can_manage' => $actor['can_manage'],
+            'can_create' => $actor['can_create'],
+            'can_update' => $actor['can_update'],
+            'can_delete' => $actor['can_delete'],
             'can_submit' => $actor['can_submit'],
+            'can_grade' => $actor['can_grade'],
+            'can_review' => $actor['can_review'],
             'teacher_id' => $actor['teacher_id'],
             'student_id' => $actor['student_id'],
             'classes' => $classes,
@@ -288,6 +374,8 @@ class SubjectClassroomController extends Controller
     public function lessons(Request $request)
     {
         $actor = $this->resolveActor($request);
+        $this->assertActorCan($actor, 'view', 'You do not have permission to view subject classroom lessons.');
+
         $query = SubjectLesson::with([
             'teacher:id,first_name,last_name',
             'subject:id,name',
@@ -333,7 +421,7 @@ class SubjectClassroomController extends Controller
             'file'        => 'required|file|max:10240', // 10 MB
         ]);
 
-        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id);
+        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id, 'create');
 
         $uploaded = $this->uploadFile($request, 'file', 'lessons');
 
@@ -361,7 +449,7 @@ class SubjectClassroomController extends Controller
     public function destroyLesson($id)
     {
         $lesson = SubjectLesson::findOrFail($id);
-        $this->guardCanManageClassSubject(request(), $lesson->class_id, $lesson->subject_id);
+        $this->guardCanManageClassSubject(request(), $lesson->class_id, $lesson->subject_id, 'delete');
         $lesson->delete();
 
         return $this->success(null, 'Lesson deleted successfully.');
@@ -378,6 +466,8 @@ class SubjectClassroomController extends Controller
     public function homework(Request $request)
     {
         $actor = $this->resolveActor($request);
+        $this->assertActorCan($actor, 'view', 'You do not have permission to view subject classroom assessments.');
+
         $assessmentConfig = $this->assessmentConfig($request->input('type'));
         $supportsReviewState = $this->supportsHomeworkReviewState();
         $query = HomeworkAssignment::with([
@@ -476,7 +566,7 @@ class SubjectClassroomController extends Controller
         $assessmentConfig = $this->assessmentConfig($request->input('assessment_type'));
         $this->ensureOfficialAssessmentSlotAvailable($assessmentConfig['type'], (int) $request->class_id, (int) $request->subject_id);
 
-        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id);
+        $schedule = $this->resolveWritableSchedule($request, (int) $request->class_id, (int) $request->subject_id, 'create');
 
         $data = [
             'class_id'    => $request->class_id,
@@ -509,7 +599,7 @@ class SubjectClassroomController extends Controller
     {
         $homework = HomeworkAssignment::findOrFail($id);
         $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
-        $this->guardCanManageClassSubject($request, $homework->class_id, $homework->subject_id);
+        $this->guardCanManageClassSubject($request, $homework->class_id, $homework->subject_id, 'update');
 
         $request->validate([
             'title'       => 'sometimes|string|max:255',
@@ -541,7 +631,7 @@ class SubjectClassroomController extends Controller
     {
         $homework = HomeworkAssignment::findOrFail($id);
         $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
-        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
+        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id, 'delete');
         $this->clearAssessmentScoresForAssignment($homework);
         $homework->delete();
 
@@ -558,7 +648,7 @@ class SubjectClassroomController extends Controller
     public function submissions($id)
     {
         $homework = HomeworkAssignment::findOrFail($id);
-        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id);
+        $this->guardCanManageClassSubject(request(), $homework->class_id, $homework->subject_id, ['grade', 'review']);
 
         $subsQuery = $homework->submissions()
             ->with('student:id,full_name_en,full_name_kh,id_card_number');
@@ -585,6 +675,8 @@ class SubjectClassroomController extends Controller
     {
         $homework = HomeworkAssignment::findOrFail($id);
         $assessmentConfig = $this->assessmentConfig($homework->assessment_type);
+        $actor = $this->resolveActor($request);
+        $this->assertActorCan($actor, 'submit', "You do not have permission to submit {$assessmentConfig['type']} items.");
 
         if (!$homework->is_active) {
             throw new ApiException(ResponseStatus::FORBIDDEN, "This {$assessmentConfig['type']} is closed for submissions.");
@@ -658,7 +750,7 @@ class SubjectClassroomController extends Controller
         $submission = HomeworkSubmission::findOrFail($id);
         $submission->loadMissing('assignment');
         $assessmentConfig = $this->assessmentConfig($submission->assignment?->assessment_type);
-        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id);
+        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id, 'grade');
 
         $request->validate([
             'score'    => 'required|numeric|min:0',
@@ -691,7 +783,7 @@ class SubjectClassroomController extends Controller
     {
         $submission = HomeworkSubmission::findOrFail($id);
         $submission->loadMissing('assignment');
-        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id);
+        $this->guardCanManageClassSubject($request, $submission->assignment->class_id, $submission->assignment->subject_id, 'review');
 
         if (!$this->supportsHomeworkReviewState()) {
             $submission->load('student:id,full_name_en,full_name_kh');
@@ -713,46 +805,56 @@ class SubjectClassroomController extends Controller
         $user = $request->user();
 
         if ($user instanceof Teacher) {
+            $capabilities = $this->actorCapabilities($this->subjectClassroomPermissionsForTeacher(), false);
+
             return [
                 'scope' => 'teacher',
                 'teacher_id' => $user->id,
                 'student_id' => null,
-                'can_manage' => true,
-                'can_submit' => false,
+                ...$capabilities,
             ];
         }
 
         if ($user instanceof User) {
+            $permissions = $this->subjectClassroomPermissionsForUser($user);
             $role = strtolower((string) $user->role?->name);
             $isPrivileged = in_array($role, ['admin', 'staff', 'assistant', 'orderstaff'], true);
+            $canSubmitAsStudent = (bool) $user->student_id || ($isPrivileged && $request->filled('student_id'));
+            $capabilities = $this->actorCapabilities($permissions, $canSubmitAsStudent);
 
-            if ($isPrivileged) {
+            if ($isPrivileged && $capabilities['can_view']) {
                 return [
                     'scope' => 'all',
                     'teacher_id' => null,
                     'student_id' => null,
-                    'can_manage' => true,
-                    'can_submit' => false,
+                    ...$capabilities,
                 ];
             }
 
-            if ($user->teacher_id) {
+            if ($user->teacher_id && $capabilities['can_view']) {
                 return [
                     'scope' => 'teacher',
                     'teacher_id' => (int) $user->teacher_id,
                     'student_id' => null,
-                    'can_manage' => true,
-                    'can_submit' => false,
+                    ...$capabilities,
                 ];
             }
 
-            if ($user->student_id) {
+            if ($user->student_id && ($capabilities['can_view'] || $capabilities['can_submit'])) {
                 return [
                     'scope' => 'student',
                     'teacher_id' => null,
                     'student_id' => (int) $user->student_id,
-                    'can_manage' => false,
-                    'can_submit' => true,
+                    ...$capabilities,
+                ];
+            }
+
+            if ($capabilities['can_view']) {
+                return [
+                    'scope' => 'all',
+                    'teacher_id' => null,
+                    'student_id' => null,
+                    ...$capabilities,
                 ];
             }
         }
@@ -761,8 +863,14 @@ class SubjectClassroomController extends Controller
             'scope' => 'none',
             'teacher_id' => null,
             'student_id' => null,
+            'can_view' => false,
             'can_manage' => false,
+            'can_create' => false,
+            'can_update' => false,
+            'can_delete' => false,
             'can_submit' => false,
+            'can_grade' => false,
+            'can_review' => false,
         ];
     }
 
@@ -881,11 +989,11 @@ class SubjectClassroomController extends Controller
         $query->whereRaw('1 = 0');
     }
 
-    private function resolveWritableSchedule(Request $request, int $classId, int $subjectId): ClassSchedule
+    private function resolveWritableSchedule(Request $request, int $classId, int $subjectId, string $permissionKey): ClassSchedule
     {
         $actor = $this->resolveActor($request);
 
-        if (!$actor['can_manage']) {
+        if (!$this->actorCanAny($actor, [$permissionKey])) {
             throw new ApiException(ResponseStatus::FORBIDDEN, 'Only assigned teachers or staff can manage subject classroom materials.');
         }
 
@@ -908,11 +1016,12 @@ class SubjectClassroomController extends Controller
         return $schedule;
     }
 
-    private function guardCanManageClassSubject(Request $request, int $classId, int $subjectId): void
+    private function guardCanManageClassSubject(Request $request, int $classId, int $subjectId, string|array $permissionKeys): void
     {
         $actor = $this->resolveActor($request);
+        $permissionKeys = (array) $permissionKeys;
 
-        if (!$actor['can_manage']) {
+        if (!$this->actorCanAny($actor, $permissionKeys)) {
             throw new ApiException(ResponseStatus::FORBIDDEN, 'Only assigned teachers or staff can manage this material.');
         }
 

@@ -35,7 +35,7 @@ class StudentRequest extends FormRequest
             ],
             'image'                                 => 'nullable|string',
             'other_notes'       => 'nullable|string',
-            'status'            => 'sometimes|in:enable,disable',
+            'status'            => 'sometimes|in:active,inactive,enable,disable',
             'student_type'      => 'required|in:PAY,PENDING,PASS,FAIL',
             'tuition_plan'      => [
                 'nullable',

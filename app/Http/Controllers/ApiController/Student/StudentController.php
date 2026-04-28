@@ -70,6 +70,14 @@ class StudentController extends Controller
     }
 
     /**
+     * Display archived students that can be restored.
+     */
+    public function archived()
+    {
+        return $this->success($this->service->archived());
+    }
+
+    /**
      * Store a newly created student (and their academic info).
      */
     public function store(StudentRequest $request) 
@@ -108,7 +116,16 @@ class StudentController extends Controller
     public function destroy($id)
     {
         $this->service->delete($id);
-        return $this->success(null, "Student deleted successfully!");
+        return $this->success(null, "Student archived successfully!");
+    }
+
+    /**
+     * Restore an archived student.
+     */
+    public function restore($id)
+    {
+        $student = $this->service->restore($id);
+        return $this->success(new StudentResource($student), "Student restored successfully!");
     }
 
     /**
@@ -116,8 +133,8 @@ class StudentController extends Controller
      */
     public function setDisable($id)
     {
-        $student = $this->service->setStatus($id, 'disable');
-        return $this->success(new StudentResource($student), "Student status updated to disable.");
+        $student = $this->service->setStatus($id, 'inactive');
+        return $this->success(new StudentResource($student), "Student status updated to inactive.");
     }
 
     /**
@@ -126,7 +143,7 @@ class StudentController extends Controller
     public function updateStatus($id)
     {
         $status = request()->validate([
-            'status' => 'required|in:enable,disable',
+            'status' => 'required|in:active,inactive,enable,disable',
         ])['status'];
 
         $student = $this->service->setStatus($id, $status);

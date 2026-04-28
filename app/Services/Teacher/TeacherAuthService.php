@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use App\Services\Concerns\ServiceTraceable;
 class TeacherAuthService
 {
@@ -32,70 +33,107 @@ class TeacherAuthService
     public function register(array $data): Teacher
     {
         return $this->trace(__FUNCTION__, function () use ($data): Teacher {
-            $imagePath = $this->storeImage($data['image'] ?? null);
-            
-            // Create Teacher record
-            $teacher = Teacher::create([
-                // core
-                'teacher_id'      => $data['teacher_id']      ?? null,
-                'first_name'      => $data['first_name'],
-                'last_name'       => $data['last_name'],
-                'gender'          => $data['gender'],
-                'major_id'        => (int) $data['major_id'],
-                'subject_id'      => (int) $data['subject_id'],
-                'email'           => strtolower($data['email']),
-                'username'        => $data['username'],
-                'password'        => Hash::make($data['password']),
-                'address'         => $data['address'],
-                // personal
-                'dob'             => $data['dob']             ?? null,
-                'nationality'     => $data['nationality']     ?? null,
-                'religion'        => $data['religion']        ?? null,
-                'marital_status'  => $data['marital_status']  ?? null,
-                'national_id'     => $data['national_id']     ?? null,
-                'phone_number'    => $data['phone_number']    ?? null,
-                'telegram'        => $data['telegram']        ?? null,
-                'image'           => $imagePath,
-                // emergency
-                'emergency_name'  => $data['emergency_name']  ?? null,
-                'emergency_phone' => $data['emergency_phone'] ?? null,
-                // professional
-                'position'        => $data['position']        ?? null,
-                'degree'          => $data['degree']          ?? null,
-                'specialization'  => $data['specialization']  ?? null,
-                'contract_type'   => $data['contract_type']   ?? null,
-                'salary_type'     => $data['salary_type']     ?? null,
-                'salary'          => $data['salary']          ?? null,
-                'experience'      => $data['experience']      ?? null,
-                'join_date'       => $data['join_date']       ?? null,
-                'note'            => $data['note']            ?? null,
-                // auth
-                'role'            => 'Teacher',
-                'otp_code'        => null,
-                'otp_expires_at'  => null,
-                'is_verified'     => true,
-                'verified_at'     => now(),
-            ]);
-            
-            // Also create a User account so the teacher appears in User Management
-            $teacherRole = Role::where('name', 'Teacher')->first();
-            $roleId = $teacherRole?->id ?? 3; // Default to 3 if Teacher role not found
-            
-            User::create([
-                'username'      => $data['username'],
-                'password_hash' => Hash::make($data['password']),
-                'role_id'       => $roleId,
-                'teacher_id'    => $teacher->id,
-                'status'        => 'Active',
-                'full_name'     => $data['first_name'] . ' ' . $data['last_name'],
-                'phone'         => $data['phone_number'] ?? null,
-                'image'         => $imagePath,
-            ]);
-            
-            return $teacher->load(['major', 'subject']);
-            
-            
+            return DB::transaction(function () use ($data): Teacher {
+                $imagePath = $this->storeImage($data['image'] ?? null);
+                $createLogin = !empty($data['username']) && !empty($data['password']);
+                $internalUsername = $createLogin
+                    ? $data['username']
+                    : $this->generateInternalUsername($data);
+                $status = $this->normalizeStatus($data['status'] ?? 'active');
+
+                // Create Teacher record. Login credentials are optional; a User can be linked later.
+                $teacher = Teacher::create([
+                    // core
+                    'teacher_id'      => $data['teacher_id']      ?? null,
+                    'first_name'      => $data['first_name'],
+                    'last_name'       => $data['last_name'],
+                    'gender'          => $data['gender'],
+                    'major_id'        => (int) $data['major_id'],
+                    'subject_id'      => (int) $data['subject_id'],
+                    'email'           => strtolower($data['email']),
+                    'username'        => $internalUsername,
+                    'password'        => $createLogin ? Hash::make($data['password']) : Hash::make(Str::random(48)),
+                    'address'         => $data['address'],
+                    // personal
+                    'dob'             => $data['dob']             ?? null,
+                    'nationality'     => $data['nationality']     ?? null,
+                    'religion'        => $data['religion']        ?? null,
+                    'marital_status'  => $data['marital_status']  ?? null,
+                    'national_id'     => $data['national_id']     ?? null,
+                    'phone_number'    => $data['phone_number']    ?? null,
+                    'telegram'        => $data['telegram']        ?? null,
+                    'image'           => $imagePath,
+                    // emergency
+                    'emergency_name'  => $data['emergency_name']  ?? null,
+                    'emergency_phone' => $data['emergency_phone'] ?? null,
+                    // professional
+                    'position'        => $data['position']        ?? null,
+                    'degree'          => $data['degree']          ?? null,
+                    'specialization'  => $data['specialization']  ?? null,
+                    'contract_type'   => $data['contract_type']   ?? null,
+                    'salary_type'     => $data['salary_type']     ?? null,
+                    'salary'          => $data['salary']          ?? null,
+                    'experience'      => $data['experience']      ?? null,
+                    'join_date'       => $data['join_date']       ?? null,
+                    'note'            => $data['note']            ?? null,
+                    // auth
+                    'role'            => 'Teacher',
+                    'status'          => $status,
+                    'otp_code'        => null,
+                    'otp_expires_at'  => null,
+                    'is_verified'     => true,
+                    'verified_at'     => now(),
+                ]);
+
+                if ($createLogin) {
+                    $teacherRole = Role::where('name', 'Teacher')->first();
+                    $roleId = $data['role_id'] ?? $teacherRole?->id ?? 3;
+
+                    User::create([
+                        'username'      => $data['username'],
+                        'password_hash' => Hash::make($data['password']),
+                        'role_id'       => $roleId,
+                        'teacher_id'    => $teacher->id,
+                        'status'        => $this->userStatusFromTeacherStatus($status),
+                        'full_name'     => $data['first_name'] . ' ' . $data['last_name'],
+                        'phone'         => $data['phone_number'] ?? null,
+                        'image'         => $imagePath,
+                    ]);
+                }
+
+                return $teacher->load(['major', 'subject']);
+            });
         });
+    }
+
+    private function generateInternalUsername(array $data): string
+    {
+        $base = 'teacher-profile-' . Str::slug((string) ($data['teacher_id'] ?? ''));
+        if ($base === 'teacher-profile-') {
+            $base .= Str::lower(Str::random(10));
+        }
+
+        $candidate = $base;
+        $counter = 1;
+
+        while (Teacher::where('username', $candidate)->exists() || User::where('username', $candidate)->exists()) {
+            $candidate = $base . '-' . $counter;
+            $counter++;
+        }
+
+        return $candidate;
+    }
+
+    private function normalizeStatus(?string $status): string
+    {
+        $value = strtolower(trim((string) ($status ?: 'active')));
+
+        return in_array($value, ['inactive', 'disable'], true) ? 'inactive' : 'active';
+    }
+
+    private function userStatusFromTeacherStatus(string $status): string
+    {
+        return $this->normalizeStatus($status) === 'inactive' ? 'Inactive' : 'Active';
     }
 
     public function update(int $id, array $data): Teacher
@@ -116,8 +154,14 @@ class TeacherAuthService
                 unset($data['password']);
             }
 
-            // Sync with User table if username or name changed
-            $user = User::where('username', $oldUsername)->first();
+            if (array_key_exists('status', $data)) {
+                $data['status'] = $this->normalizeStatus($data['status']);
+            }
+
+            // Sync with a linked User account when one exists. Profile-only teachers may not have a username.
+            $user = $oldUsername
+                ? User::where('username', $oldUsername)->first()
+                : User::where('teacher_id', $teacher->id)->first();
             
             $teacher->update($data);
 
@@ -130,6 +174,7 @@ class TeacherAuthService
                 }
                 if (isset($data['phone_number'])) $userUpdates['phone'] = $data['phone_number'];
                 if (isset($data['image'])) $userUpdates['image'] = $data['image'];
+                if (isset($data['status'])) $userUpdates['status'] = $this->userStatusFromTeacherStatus($data['status']);
 
                 if (!empty($userUpdates)) {
                     $user->update($userUpdates);
@@ -137,6 +182,45 @@ class TeacherAuthService
             }
 
             return $teacher->fresh(['major', 'subject']);
+        });
+    }
+
+    public function archive(int $id, ?int $deletedBy = null, ?string $reason = null): bool
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $deletedBy, $reason): bool {
+            return DB::transaction(function () use ($id, $deletedBy, $reason): bool {
+                $teacher = Teacher::findOrFail($id);
+
+                $teacher->forceFill([
+                    'status' => 'archived',
+                    'deleted_by' => $deletedBy,
+                    'delete_reason' => $reason,
+                ])->save();
+
+                User::where('teacher_id', $teacher->id)->update(['status' => 'Inactive']);
+
+                return $teacher->delete();
+            });
+        });
+    }
+
+    public function restore(int $id): Teacher
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): Teacher {
+            return DB::transaction(function () use ($id): Teacher {
+                $teacher = Teacher::onlyTrashed()->findOrFail($id);
+
+                $teacher->restore();
+                $teacher->forceFill([
+                    'status' => 'active',
+                    'deleted_by' => null,
+                    'delete_reason' => null,
+                ])->save();
+
+                User::where('teacher_id', $teacher->id)->update(['status' => 'Active']);
+
+                return $teacher->fresh(['major', 'subject']);
+            });
         });
     }
 

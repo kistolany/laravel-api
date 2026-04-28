@@ -6,10 +6,11 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Teacher extends Authenticatable
 {
-    use Notifiable;
+    use Notifiable, SoftDeletes;
 
     protected $table = 'teachers';
 
@@ -44,6 +45,9 @@ class Teacher extends Authenticatable
         'emergency_phone',
         'note',
         'role',
+        'status',
+        'deleted_by',
+        'delete_reason',
         'otp_code',
         'otp_expires_at',
         'is_verified',
@@ -67,6 +71,7 @@ class Teacher extends Authenticatable
             'is_verified'   => 'boolean',
             'otp_expires_at'=> 'datetime',
             'verified_at'   => 'datetime',
+            'deleted_at'    => 'datetime',
         ];
     }
 

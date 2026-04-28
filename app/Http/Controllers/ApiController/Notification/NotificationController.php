@@ -62,26 +62,39 @@ class NotificationController extends Controller
     }
 
     /**
-     * Public feed — any authenticated user can poll this to receive
-     * broadcast notifications (audience = all).  No permission gate.
+     * Personal feed — returns:
+     *   1. Broadcast rows (audience = 'all', target_user_id IS NULL)
+     *   2. Rows targeted specifically at this user (target_user_id = auth user id)
      */
     public function feed(Request $request): JsonResponse
     {
-        $since = $request->query('since'); // optional: ISO timestamp or ID
+        $since  = $request->query('since');
+        $userId = $request->user()?->id;
 
         $query = DB::table('push_notifications as n')
             ->leftJoin('users as u', 'u.id', '=', 'n.sent_by')
-            ->where('n.audience', 'all')
+            ->where(function ($q) use ($userId) {
+                // broadcast to everyone
+                $q->where(function ($q2) {
+                    $q2->where('n.audience', 'all')
+                       ->whereNull('n.target_user_id');
+                });
+                // OR targeted specifically at this user
+                if ($userId) {
+                    $q->orWhere('n.target_user_id', $userId);
+                }
+            })
             ->select(
                 'n.id',
                 'n.title',
                 'n.body',
                 'n.priority',
+                'n.target_user_id',
                 'n.created_at',
                 'u.full_name as sent_by_name',
             )
             ->orderBy('n.id', 'desc')
-            ->limit(50);
+            ->limit(100);
 
         if ($since) {
             $query->where('n.id', '>', intval($since));

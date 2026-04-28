@@ -38,8 +38,16 @@ class TeacherRequest extends FormRequest
             'major_id'        => 'required|integer|exists:majors,id',
             'subject_id'      => 'required|integer|exists:subjects,id',
             'email'           => ['required', 'email', 'max:255', Rule::unique('teachers', 'email')],
-            'username'        => ['required', 'string', 'max:255', Rule::unique('teachers', 'username')],
-            'password'        => 'required|string|min:6|max:255',
+            'username'        => [
+                'nullable',
+                'required_with:password',
+                'string',
+                'max:255',
+                Rule::unique('teachers', 'username'),
+                Rule::unique('users', 'username'),
+            ],
+            'password'        => 'nullable|required_with:username|string|min:6|max:255',
+            'role_id'         => 'nullable|integer|exists:roles,id',
             'address'         => 'required|string|max:2000',
             // optional personal
             'teacher_id'      => 'nullable|string|max:20',
@@ -64,6 +72,7 @@ class TeacherRequest extends FormRequest
             'experience'      => 'nullable|integer|min:0',
             'join_date'       => 'nullable|date',
             'note'            => 'nullable|string|max:5000',
+            'status'          => 'nullable|in:active,inactive,Active,Inactive,enable,disable',
         ];
     }
 
@@ -103,6 +112,7 @@ class TeacherRequest extends FormRequest
             'experience'      => 'nullable|integer|min:0',
             'join_date'       => 'nullable|date',
             'note'            => 'nullable|string|max:5000',
+            'status'          => 'nullable|in:active,inactive,Active,Inactive,enable,disable',
         ];
     }
 

@@ -47,6 +47,9 @@ class StudentResource extends JsonResource
             'doc'               => $this->doc,
             'image'             => $this->image,
             'status'            => $this->status,
+            'deleted_at'        => $this->deleted_at?->format('Y-m-d H:i:s'),
+            'deleted_by'        => $this->deleted_by,
+            'delete_reason'     => $this->delete_reason,
 
             // 'whenLoaded' is great because it prevents unnecessary SQL queries
             'academic_details'  => $this->whenLoaded('academicInfo', fn() => new AcademicInfoResource($this->academicInfo)),

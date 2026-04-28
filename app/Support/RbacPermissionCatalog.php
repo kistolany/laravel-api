@@ -19,8 +19,11 @@ final class RbacPermissionCatalog
             'permission.delete',
 
             'student.view',
+            'student.active.view',
+            'student.archive.view',
             'student.create',
             'student.update',
+            'student.status.update',
             'student.delete',
             'student.disable',
             'student.image.update',
@@ -29,9 +32,17 @@ final class RbacPermissionCatalog
             'student.card.by_major.view',
 
             'teacher.view',
+            'teacher.active.view',
+            'teacher.archive.view',
             'teacher.create',
             'teacher.update',
+            'teacher.status.update',
             'teacher.delete',
+
+            'staff.view',
+            'staff.create',
+            'staff.update',
+            'staff.delete',
 
             'class.view',
             'class.create',
@@ -41,6 +52,14 @@ final class RbacPermissionCatalog
             'class.students.add_by_major',
             'class.subjects.view',
             'class.subjects.assign',
+
+            'subject_classroom.view',
+            'subject_classroom.create',
+            'subject_classroom.update',
+            'subject_classroom.delete',
+            'subject_classroom.submit',
+            'subject_classroom.grade',
+            'subject_classroom.review',
 
             'attendance.view',
             'attendance.create',

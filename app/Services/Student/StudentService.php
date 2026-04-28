@@ -87,8 +87,7 @@ class StudentService extends BaseService
                 });
             });
             
-            // 7. Filter by Status (default: only show active students)
-            $query->where('status', 'active');
+            $this->applyStudentListFilters($query, 'active');
 
             // 8. Final Sort and Paginate
             return $this->paginateResponse($query->latest(), StudentResource::class);
@@ -103,6 +102,21 @@ class StudentService extends BaseService
     public function pendingStudents(): PaginatedResult
     {
         return $this->studentsByTypes(['PENDING'], __FUNCTION__);
+    }
+
+    /**
+     * Get archived students. Archived records are soft deleted so historical
+     * attendance, scores, payments, and class links remain intact.
+     */
+    public function archived(): PaginatedResult
+    {
+        return $this->trace(__FUNCTION__, function (): PaginatedResult {
+            $query = $this->studentListBaseQuery()->onlyTrashed();
+
+            $this->applyStudentListFilters($query);
+
+            return $this->paginateResponse($query->latest('deleted_at'), StudentResource::class);
+        });
     }
 
     /**
@@ -151,20 +165,10 @@ class StudentService extends BaseService
     private function studentsByTypes(array $studentTypes, string $traceName, bool $excludeOverAbsentLimit = false): PaginatedResult
     {
         return $this->trace($traceName, function () use ($studentTypes, $excludeOverAbsentLimit): PaginatedResult {
-            $query = Students::with([
-                'academicInfo.major.faculty',
-                'academicInfo.shift',
-                'addresses.province',
-                'addresses.district',
-                'addresses.commune',
-                'parentGuardian',
-                'registration',
-                'scholarship',
-                'classes',
-            ])->whereIn('student_type', $studentTypes)
-              ->where('status', 'active');
+            $query = $this->studentListBaseQuery()
+              ->whereIn('student_type', $studentTypes);
 
-            $this->applyStudentListFilters($query);
+            $this->applyStudentListFilters($query, 'active');
 
             if ($excludeOverAbsentLimit) {
                 $this->excludeStudentsWithTooManyAbsences($query);
@@ -174,7 +178,22 @@ class StudentService extends BaseService
         });
     }
 
-    private function applyStudentListFilters(Builder $query): void
+    private function studentListBaseQuery(): Builder
+    {
+        return Students::with([
+            'academicInfo.major.faculty',
+            'academicInfo.shift',
+            'addresses.province',
+            'addresses.district',
+            'addresses.commune',
+            'parentGuardian',
+            'registration',
+            'scholarship',
+            'classes',
+        ]);
+    }
+
+    private function applyStudentListFilters(Builder $query, ?string $defaultStatus = null): void
     {
         // Filter by major
         $query->when(request('major_id'), function ($q, $majorId) {
@@ -231,6 +250,16 @@ class StudentService extends BaseService
                     ->orWhere('id', 'like', "%{$search}%");
             });
         });
+
+        $status = request()->filled('status')
+            ? $this->normalizeStudentStatus(request('status'))
+            : $defaultStatus;
+
+        if ($status === 'active') {
+            $query->whereIn('status', ['active', 'enable']);
+        } elseif ($status === 'inactive') {
+            $query->whereIn('status', ['inactive', 'disable']);
+        }
     }
 
     private function excludeStudentsWithTooManyAbsences(Builder $query): void
@@ -328,6 +357,7 @@ class StudentService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($data): Students {
             $validatedData = $this->validateExisting($data);
+            $validatedData = $this->normalizeStudentStatusData($validatedData);
             $shouldGenerateStudentCode = $this->shouldGenerateStudentCode($validatedData['id_card_number'] ?? null);
 
             if ($shouldGenerateStudentCode) {
@@ -412,6 +442,7 @@ class StudentService extends BaseService
         return $this->trace(__FUNCTION__, function () use ($id, $data): Students {
             $student = $this->findById($id);
             $validatedData = $this->validateExisting($data, $student->id);
+            $validatedData = $this->normalizeStudentStatusData($validatedData);
             $validatedData = $this->normalizeTuitionPlan($validatedData, $student);
             $validatedData['id_card_number'] = $this->resolvedStudentCode(
                 $validatedData['id_card_number'] ?? null,
@@ -496,15 +527,50 @@ class StudentService extends BaseService
     }
 
     /**
-     * Delete Student (Academic info will delete if cascade is set in migration)
+     * Archive a student using soft delete.
      */
     public function delete(int $id): bool
     {
         return $this->trace(__FUNCTION__, function () use ($id): bool {
             $student = $this->findById($id);
+            $student->forceFill([
+                'status' => 'archived',
+                'deleted_by' => request()->user()?->id,
+                'delete_reason' => request('delete_reason'),
+            ])->save();
+
             return $student->delete();
-            
-            
+        });
+    }
+
+    public function restore(int $id): Students
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): Students {
+            $student = Students::onlyTrashed()->find($id);
+
+            if (!$student) {
+                Log::warning('Archived student not found.', ['id' => $id]);
+                throw new ApiException(ResponseStatus::NOT_FOUND, "Archived student with ID :$id not found.");
+            }
+
+            $student->restore();
+            $student->forceFill([
+                'status' => 'active',
+                'deleted_by' => null,
+                'delete_reason' => null,
+            ])->save();
+
+            return $student->refresh()->load([
+                'academicInfo.major.faculty',
+                'academicInfo.shift',
+                'addresses.province',
+                'addresses.district',
+                'addresses.commune',
+                'parentGuardian',
+                'registration',
+                'scholarship',
+                'classes',
+            ]);
         });
     }
 
@@ -590,7 +656,7 @@ class StudentService extends BaseService
             ],
             'short_docs_status' => 'boolean',
             'image'          => 'nullable|string',
-            'status'            => 'sometimes|in:enable,disable',
+            'status'            => 'sometimes|in:active,inactive,enable,disable',
             'student_type'      => 'required|in:PAY,PENDING,PASS,FAIL',
             'tuition_plan'      => ['nullable', 'string', Rule::in(self::TUITION_PLANS)],
             'exam_place'        => 'nullable|string|max:255',
@@ -722,7 +788,7 @@ class StudentService extends BaseService
     {
         return $this->trace(__FUNCTION__, function () use ($id, $status): Students {
             $student = $this->findById($id);
-            $student->update(['status' => $status]);
+            $student->update(['status' => $this->normalizeStudentStatus($status)]);
             
             return $student->refresh()->load([
                 'academicInfo.major.faculty',
@@ -737,6 +803,24 @@ class StudentService extends BaseService
             
             
         });
+    }
+
+    private function normalizeStudentStatusData(array $data): array
+    {
+        if (array_key_exists('status', $data) && $data['status'] !== null && $data['status'] !== '') {
+            $data['status'] = $this->normalizeStudentStatus($data['status']);
+        }
+
+        return $data;
+    }
+
+    private function normalizeStudentStatus(?string $status): ?string
+    {
+        return match (strtolower((string) $status)) {
+            'enable', 'enabled', 'active' => 'active',
+            'disable', 'disabled', 'inactive' => 'inactive',
+            default => $status,
+        };
     }
 
     /**

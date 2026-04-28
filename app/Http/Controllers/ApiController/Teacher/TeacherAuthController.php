@@ -23,26 +23,48 @@ class TeacherAuthController extends Controller
     {
     }
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $teachers = \App\Models\Teacher::with(['major', 'subject'])
+            ->when($request->boolean('archived'), function ($query) {
+                $query->onlyTrashed();
+            })
+            ->when($request->filled('status'), function ($query) use ($request) {
+                $status = strtolower((string) $request->query('status'));
+                $query->where('status', $status === 'inactive' ? 'inactive' : 'active');
+            }, function ($query) use ($request) {
+                if (!$request->boolean('archived')) {
+                    $query->where('status', 'active');
+                }
+            })
             ->orderBy('created_at', 'desc')
             ->get();
 
         return $this->success(TeacherResource::collection($teachers), 'Teachers retrieved successfully.');
     }
 
+    public function archived(): JsonResponse
+    {
+        $teachers = \App\Models\Teacher::with(['major', 'subject'])
+            ->onlyTrashed()
+            ->orderBy('deleted_at', 'desc')
+            ->get();
+
+        return $this->success(TeacherResource::collection($teachers), 'Archived teachers retrieved successfully.');
+    }
+
     public function destroy(int $id): JsonResponse
     {
-        $teacher = \App\Models\Teacher::find($id);
+        $this->service->archive($id, request()->user()?->id, request('delete_reason'));
 
-        if (!$teacher) {
-            return $this->error('Teacher not found.', \App\Enums\ResponseStatus::NOT_FOUND);
-        }
+        return $this->success(null, 'Teacher archived successfully.');
+    }
 
-        $teacher->delete();
+    public function restore(int $id): JsonResponse
+    {
+        $teacher = $this->service->restore($id);
 
-        return $this->success(null, 'Teacher deleted successfully.');
+        return $this->success(new TeacherResource($teacher), 'Teacher restored successfully.');
     }
 
     public function register(TeacherRequest $request): JsonResponse
@@ -59,7 +81,12 @@ class TeacherAuthController extends Controller
     public function update(TeacherRequest $request, int $id): JsonResponse
     {
         try {
-            $teacher = $this->service->update($id, $request->validated());
+            $data = $request->validated();
+            if (!$request->user()?->hasPermission('teacher.update')) {
+                $data = array_intersect_key($data, array_flip(['status']));
+            }
+
+            $teacher = $this->service->update($id, $data);
         } catch (ApiException $e) {
             return $e->render($request);
         }
@@ -181,4 +208,3 @@ class TeacherAuthController extends Controller
         return $this->success(null, 'Teacher refresh token revoked.');
     }
 }
-

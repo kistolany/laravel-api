@@ -19,7 +19,9 @@ class RolePermissionRepairSeeder extends Seeder
                 'leave_request.view',
                 'leave_request.create',
                 'class_schedule.view',
-                'academic_info.view'
+                'academic_info.view',
+                'subject_classroom.view',
+                'subject_classroom.submit',
             ])->pluck('id');
             
             $studentRole->permissions()->syncWithoutDetaching($perms);

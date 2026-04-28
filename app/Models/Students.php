@@ -6,9 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Students extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'students';
 
     protected $fillable = [
@@ -30,6 +33,8 @@ class Students extends Model
         'registration_date',
         'short_docs_status',
         'status',
+        'deleted_by',
+        'delete_reason',
         'other_notes'
     ];
 
@@ -37,6 +42,7 @@ class Students extends Model
         'short_docs_status' => 'boolean',
         'dob' => 'date',
         'tuition_plan_assigned_at' => 'datetime',
+        'deleted_at' => 'datetime',
     ];
 
     public function academicInfo(): HasOne
