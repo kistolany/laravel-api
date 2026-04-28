@@ -64,21 +64,28 @@ class NotificationController extends Controller
     /**
      * Personal feed — returns:
      *   1. Broadcast rows (audience = 'all', target_user_id IS NULL)
-     *   2. Rows targeted specifically at this user (target_user_id = auth user id)
+     *   2. Role audience rows matching the signed-in user role
+     *   3. Rows targeted specifically at this user (target_user_id = auth user id)
      */
     public function feed(Request $request): JsonResponse
     {
         $since  = $request->query('since');
-        $userId = $request->user()?->id;
+        $user = $request->user();
+        $userId = $user?->id;
+        $roleName = strtolower((string) ($user?->role?->name ?? $user?->role_name ?? ''));
 
         $query = DB::table('push_notifications as n')
             ->leftJoin('users as u', 'u.id', '=', 'n.sent_by')
-            ->where(function ($q) use ($userId) {
+            ->where(function ($q) use ($userId, $roleName) {
                 // broadcast to everyone
                 $q->where(function ($q2) {
                     $q2->where('n.audience', 'all')
                        ->whereNull('n.target_user_id');
                 });
+                // OR broadcast to the current role
+                if ($roleName !== '') {
+                    $q->orWhereRaw('LOWER(n.audience) = ?', [$roleName]);
+                }
                 // OR targeted specifically at this user
                 if ($userId) {
                     $q->orWhere('n.target_user_id', $userId);

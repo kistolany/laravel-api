@@ -76,8 +76,13 @@ class StudentRequest extends FormRequest
 
             // Registration details
             'registration'                     => 'nullable|array',
+            'registration.admission_path'      => 'nullable|string|in:NEW_ENTRY,TRANSFER,DIRECT_ENTRY',
             'registration.high_school_name'   => 'nullable|string|max:255',
             'registration.high_school_province' => 'nullable|string|max:255',
+            'registration.previous_school_name' => 'nullable|string|max:255',
+            'registration.previous_school_province' => 'nullable|string|max:255',
+            'registration.completed_year_level' => 'nullable|string|max:30',
+            'registration.placement_notes'     => 'nullable|string',
             'registration.bacii_exam_year'    => 'nullable|integer|min:2000|max:2100',
             'registration.bacii_grade'        => 'nullable|string|max:10',
             'registration.target_degree'      => 'nullable|string|max:255',

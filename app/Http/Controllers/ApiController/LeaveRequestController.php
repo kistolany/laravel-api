@@ -11,6 +11,7 @@ use App\Models\Students;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use App\Traits\ApiResponseTrait;
 
 class LeaveRequestController extends Controller
@@ -173,6 +174,7 @@ class LeaveRequestController extends Controller
         $validated['status'] = 'pending';
         
         $leave = LeaveRequest::create($validated);
+        $this->pushTeacherLeaveNotification($leave, $request);
         
         return response()->json(['message' => 'Created successfully', 'data' => $leave], 201);
     }
@@ -250,6 +252,27 @@ class LeaveRequestController extends Controller
                 );
             }
         }
+    }
+
+    private function pushTeacherLeaveNotification(LeaveRequest $leave, Request $request): void
+    {
+        if ($leave->requester_type !== 'teacher') {
+            return;
+        }
+
+        $name = trim((string) ($leave->requester_name ?: 'A teacher'));
+        $type = trim((string) ($leave->leave_type ?: 'leave'));
+        $dates = trim((string) $leave->start_date) . ' to ' . trim((string) $leave->end_date);
+
+        DB::table('push_notifications')->insert([
+            'title'      => 'New Teacher Leave Request',
+            'body'       => "{$name} submitted a {$type} request for {$dates}.",
+            'audience'   => 'admin',
+            'priority'   => 'warning',
+            'sent_by'    => $request->user()?->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 
     private function resolveTeacherForUser(\App\Models\User $user): ?\App\Models\Teacher

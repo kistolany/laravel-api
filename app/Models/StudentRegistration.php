@@ -11,8 +11,13 @@ class StudentRegistration extends Model
 
     protected $fillable = [
         'student_id',
+        'admission_path',
         'high_school_name',
         'high_school_province',
+        'previous_school_name',
+        'previous_school_province',
+        'completed_year_level',
+        'placement_notes',
         'bacii_exam_year',
         'bacii_grade',
         'target_degree',
