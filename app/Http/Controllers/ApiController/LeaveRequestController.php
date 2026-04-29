@@ -197,6 +197,8 @@ class LeaveRequestController extends Controller
             $this->generateAutoAttendance($leave);
         }
 
+        $this->pushLeaveDecisionNotification($leave, $request);
+
         return response()->json(['message' => 'Status updated successfully', 'data' => $leave]);
     }
 
@@ -273,6 +275,51 @@ class LeaveRequestController extends Controller
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    private function pushLeaveDecisionNotification(LeaveRequest $leave, Request $request): void
+    {
+        $targetUserId = $this->resolveLeaveRequesterUserId($leave);
+
+        if (! $targetUserId) {
+            return;
+        }
+
+        $status = strtolower((string) $leave->status);
+        $statusLabel = $status === 'approved' ? 'Approved' : ($status === 'rejected' ? 'Rejected' : ucfirst($status));
+        $startDate = $leave->start_date instanceof Carbon ? $leave->start_date->format('Y-m-d') : (string) $leave->start_date;
+        $endDate = $leave->end_date instanceof Carbon ? $leave->end_date->format('Y-m-d') : (string) $leave->end_date;
+
+        DB::table('push_notifications')->insert([
+            'title'          => "Leave Request {$statusLabel}",
+            'body'           => "Your {$leave->leave_type} request from {$startDate} to {$endDate} was {$status}.",
+            'audience'       => 'all',
+            'priority'       => $status === 'rejected' ? 'warning' : 'info',
+            'sent_by'        => $request->user()?->id,
+            'target_user_id' => $targetUserId,
+            'created_at'     => now(),
+            'updated_at'     => now(),
+        ]);
+    }
+
+    private function resolveLeaveRequesterUserId(LeaveRequest $leave): ?int
+    {
+        $column = match ($leave->requester_type) {
+            'teacher' => 'teacher_id',
+            'student' => 'student_id',
+            default => null,
+        };
+
+        if (! $column) {
+            return null;
+        }
+
+        $userId = DB::table('users')
+            ->where($column, $leave->requester_id)
+            ->where('status', 'Active')
+            ->value('id');
+
+        return $userId ? (int) $userId : null;
     }
 
     private function resolveTeacherForUser(\App\Models\User $user): ?\App\Models\Teacher

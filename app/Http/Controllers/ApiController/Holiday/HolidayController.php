@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -146,7 +147,13 @@ class HolidayController extends Controller
         }
 
         $fullPath = Storage::disk('public')->path($holiday->document_path);
-        return response()->download($fullPath, $holiday->document_name ?? basename($holiday->document_path));
+        $fileName = $holiday->document_name ?? basename($holiday->document_path);
+        $mimeType = File::mimeType($fullPath) ?: 'application/octet-stream';
+
+        return response()->file($fullPath, [
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => 'inline; filename="' . addslashes($fileName) . '"',
+        ]);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -173,6 +180,9 @@ class HolidayController extends Controller
             'document_name' => $h->document_name ?? null,
             'document_url'  => $h->document_path
                 ? Storage::disk('public')->url($h->document_path)
+                : null,
+            'document_preview_url' => $h->document_path
+                ? "/api/v1/holidays/{$h->id}/document"
                 : null,
             'created_at'    => $h->created_at,
         ];
