@@ -4,14 +4,20 @@ namespace App\Http\Controllers\ApiController\Dashboard;
 
 use App\Http\Controllers\Controller;
 use App\Models\Classes;
+use App\Models\AttendanceSession;
 use App\Models\ClassSchedule;
+use App\Models\ClassStudent;
+use App\Models\LeaveRequest;
 use App\Models\Major;
+use App\Models\StaffAttendance;
+use App\Models\StudentPayment;
 use App\Models\Students;
 use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TeacherAttendance;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
@@ -136,19 +142,86 @@ class DashboardController extends Controller
         ]);
     }
 
-    public function stats()
+    public function stats(Request $request)
     {
+        $period = strtolower((string) $request->query('period', 'month'));
+        if (!in_array($period, ['week', 'month', 'year'], true)) {
+            $period = 'month';
+        }
+
+        $data = Cache::remember("dashboard:stats:v5:{$period}", now()->addSeconds(60), function () use ($period) {
         // ── Counts ────────────────────────────────────────────────────
         $totalStudents   = Students::count();
-        $activeStudents  = Students::where('status', 'Active')->count();
+        $activeStudents  = Students::whereIn('status', ['Active', 'active', 'enable'])->count();
         $maleStudents    = Students::where('gender', 'Male')->count();
         $femaleStudents  = Students::where('gender', 'Female')->count();
         $totalTeachers   = Teacher::count();
+        $activeTeachers  = Teacher::whereIn('status', ['Active', 'active', 'enable'])->count();
         $totalClasses    = Classes::count();
         $activeClasses   = Classes::where('is_active', true)->count();
         $totalMajors     = Major::count();
         $totalSubjects   = Subject::count();
         $totalSchedules  = ClassSchedule::count();
+        $pendingLeaveRequests = LeaveRequest::where('status', 'pending')->count();
+        $unpaidPayments = StudentPayment::whereIn('status', ['pending', 'partial', 'overdue'])->count();
+        $overduePayments = StudentPayment::whereIn('status', ['pending', 'partial', 'overdue'])
+            ->whereNotNull('due_date')
+            ->whereDate('due_date', '<', now()->toDateString())
+            ->count();
+        $unassignedStudents = Students::whereIn('status', ['Active', 'active', 'enable'])
+            ->whereDoesntHave('classes')
+            ->count();
+        $activeClassEnrollments = ClassStudent::whereIn('status', ['Active', 'active'])->count();
+
+        $paymentSummary = StudentPayment::select('status', DB::raw('COUNT(*) as count'), DB::raw('SUM(amount_due - amount_paid - discount) as balance'))
+            ->groupBy('status')
+            ->get()
+            ->map(fn ($row) => [
+                'status' => $row->status ?: 'unknown',
+                'count' => (int) $row->count,
+                'balance' => (float) $row->balance,
+            ])
+            ->values();
+
+        $staffAttendanceToday = StaffAttendance::whereDate('attendance_date', now()->toDateString())
+            ->select('status', DB::raw('COUNT(*) as count'))
+            ->groupBy('status')
+            ->get()
+            ->map(fn ($row) => [
+                'status' => $row->status,
+                'count' => (int) $row->count,
+            ])
+            ->values();
+
+        $attendanceSessionsLast7Days = DB::table('attendance_sessions')
+            ->select(DB::raw('DATE(session_date) as date'), DB::raw('COUNT(*) as count'))
+            ->whereBetween('session_date', [now()->subDays(6)->toDateString(), now()->toDateString()])
+            ->groupBy(DB::raw('DATE(session_date)'))
+            ->orderBy('date')
+            ->get();
+
+        $attendanceSessionsByDate = $attendanceSessionsLast7Days->keyBy('date');
+        $attendanceTrend = collect(range(6, 0))
+            ->map(function (int $daysAgo) use ($attendanceSessionsByDate) {
+                $date = now()->subDays($daysAgo)->toDateString();
+                return [
+                    'date' => $date,
+                    'count' => (int) ($attendanceSessionsByDate->get($date)?->count ?? 0),
+                ];
+            })
+            ->values();
+
+        $weekdayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        $scheduleCounts = ClassSchedule::select('day_of_week', DB::raw('COUNT(*) as count'))
+            ->groupBy('day_of_week')
+            ->get()
+            ->keyBy('day_of_week');
+        $schedulesByDay = collect($weekdayOrder)
+            ->map(fn ($day) => [
+                'day' => $day,
+                'count' => (int) ($scheduleCounts->get($day)?->count ?? 0),
+            ])
+            ->values();
 
         // ── Student status breakdown ──────────────────────────────────
         $statusBreakdown = Students::select('status', DB::raw('COUNT(*) as count'))
@@ -185,6 +258,69 @@ class DashboardController extends Controller
             ->groupBy('month', 'sort_key')
             ->orderBy('sort_key')
             ->get();
+
+        $enrollmentGroup = $period === 'year' ? 'month' : 'day';
+        $periodStart = match ($period) {
+            'week' => now()->startOfWeek(),
+            'year' => now()->startOfYear(),
+            default => now()->startOfMonth(),
+        };
+        $periodEnd = match ($period) {
+            'week' => now()->endOfWeek(),
+            'year' => now()->endOfYear(),
+            default => now()->endOfMonth(),
+        };
+        $periodLabel = match ($period) {
+            'week' => 'Daily student records for this week',
+            'year' => 'Monthly student records for this year',
+            default => 'Daily student records for this month',
+        };
+
+        if ($enrollmentGroup === 'month') {
+            $enrollmentRows = DB::table('students')
+                ->select(DB::raw("DATE_FORMAT(created_at, '%Y-%m') as bucket"), DB::raw('COUNT(*) as count'))
+                ->whereBetween('created_at', [$periodStart, $periodEnd])
+                ->groupBy('bucket')
+                ->orderBy('bucket')
+                ->get()
+                ->keyBy('bucket');
+
+            $enrollmentTrend = collect(range(1, 12))
+                ->map(function (int $month) use ($periodStart, $enrollmentRows) {
+                    $date = $periodStart->copy()->month($month)->startOfMonth();
+                    $bucket = $date->format('Y-m');
+                    return [
+                        'date' => $date->toDateString(),
+                        'month' => $month,
+                        'count' => (int) ($enrollmentRows->get($bucket)?->count ?? 0),
+                    ];
+                })
+                ->values();
+        } else {
+            $enrollmentRows = DB::table('students')
+                ->select(DB::raw('DATE(created_at) as bucket'), DB::raw('COUNT(*) as count'))
+                ->whereBetween('created_at', [$periodStart, $periodEnd])
+                ->groupBy(DB::raw('DATE(created_at)'))
+                ->orderBy('bucket')
+                ->get()
+                ->keyBy('bucket');
+
+            $days = $periodStart->diffInDays($periodEnd) + 1;
+            $enrollmentTrend = collect(range(0, $days - 1))
+                ->map(function (int $offset) use ($periodStart, $enrollmentRows) {
+                    $date = $periodStart->copy()->addDays($offset);
+                    $bucket = $date->toDateString();
+                    $day = (int) $date->format('d');
+                    return [
+                        'date' => $bucket,
+                        'day' => $day,
+                        'count' => (int) ($enrollmentRows->get($bucket)?->count ?? 0),
+                    ];
+                })
+                ->values();
+        }
+
+        $enrollmentDaily = $enrollmentTrend;
 
         // ── Recent enrollments (last 5 students) ─────────────────────
         $recentStudents = DB::table('students')
@@ -255,22 +391,28 @@ class DashboardController extends Controller
             ->limit(8)
             ->get();
 
-        return $this->success([
+        return [
             'total_students'   => $totalStudents,
             'active_students'  => $activeStudents,
             'male_students'    => $maleStudents,
             'female_students'  => $femaleStudents,
             'total_teachers'   => $totalTeachers,
+            'active_teachers'  => $activeTeachers,
             'total_classes'    => $totalClasses,
             'active_classes'   => $activeClasses,
             'total_majors'     => $totalMajors,
             'total_subjects'   => $totalSubjects,
             'total_schedules'  => $totalSchedules,
+            'pending_leave_requests' => $pendingLeaveRequests,
+            'unpaid_payments' => $unpaidPayments,
+            'overdue_payments' => $overduePayments,
+            'unassigned_students' => $unassignedStudents,
+            'active_class_enrollments' => $activeClassEnrollments,
             'status_breakdown' => [
-                'active'    => (int)($statusBreakdown->get('Active')?->count    ?? 0),
-                'graduated' => (int)($statusBreakdown->get('Graduated')?->count ?? 0),
-                'dropped'   => (int)($statusBreakdown->get('Dropped')?->count   ?? 0),
-                'suspended' => (int)($statusBreakdown->get('Suspended')?->count ?? 0),
+                'active'    => (int) (($statusBreakdown->get('Active')?->count ?? 0) + ($statusBreakdown->get('active')?->count ?? 0) + ($statusBreakdown->get('enable')?->count ?? 0)),
+                'graduated' => (int) (($statusBreakdown->get('Graduated')?->count ?? 0) + ($statusBreakdown->get('graduated')?->count ?? 0)),
+                'dropped'   => (int) (($statusBreakdown->get('Dropped')?->count ?? 0) + ($statusBreakdown->get('dropped')?->count ?? 0)),
+                'suspended' => (int) (($statusBreakdown->get('Suspended')?->count ?? 0) + ($statusBreakdown->get('suspended')?->count ?? 0)),
             ],
             'by_major'           => $byMajor,
             'by_gender'          => [
@@ -278,10 +420,22 @@ class DashboardController extends Controller
                 'female' => (int)($byGender->get('Female')?->count ?? 0),
             ],
             'by_month'           => $byMonth,
+            'enrollment_daily'    => $enrollmentDaily,
+            'enrollment_trend'    => $enrollmentTrend,
+            'enrollment_period'   => $period,
+            'enrollment_group'    => $enrollmentGroup,
+            'enrollment_period_label' => $periodLabel,
             'recent_students'    => $recentStudents,
             'class_occupancy'    => $classOccupancy,
             'today_schedules'    => $todaySchedules,
+            'payment_summary'     => $paymentSummary,
+            'staff_attendance_today' => $staffAttendanceToday,
+            'attendance_trend'    => $attendanceTrend,
+            'schedules_by_day'    => $schedulesByDay,
             'today'              => $todayName,
-        ]);
+        ];
+        });
+
+        return $this->success($data);
     }
 }

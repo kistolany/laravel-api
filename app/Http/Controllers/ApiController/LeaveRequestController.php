@@ -45,7 +45,7 @@ class LeaveRequestController extends Controller
         // 1. Apply Automatic Restrictions based on Role
         if ($user instanceof \App\Models\Teacher) {
             // Logged in via Teacher guard
-            $query->where('requester_type', 'teacher')->where('requester_id', $user->id);
+            $query->where('leave_requests.requester_type', 'teacher')->where('leave_requests.requester_id', $user->id);
         } elseif ($user instanceof \App\Models\User) {
             // Logged in via User guard (Standard account)
             if ($user->hasRole('Student')) {
@@ -56,7 +56,7 @@ class LeaveRequestController extends Controller
                 }
                 
                 if ($studentId) {
-                    $query->where('requester_type', 'student')->where('requester_id', $studentId);
+                    $query->where('leave_requests.requester_type', 'student')->where('leave_requests.requester_id', $studentId);
                 } else {
                     $query->whereRaw('1 = 0');
                 }
@@ -65,7 +65,7 @@ class LeaveRequestController extends Controller
                 $teacher = $this->resolveTeacherForUser($user);
 
                 if ($teacher) {
-                    $query->where('requester_type', 'teacher')->where('requester_id', $teacher->id);
+                    $query->where('leave_requests.requester_type', 'teacher')->where('leave_requests.requester_id', $teacher->id);
                 } else {
                     $query->whereRaw('1 = 0');
                 }
@@ -76,32 +76,32 @@ class LeaveRequestController extends Controller
         $isAdmin = ($user instanceof \App\Models\User && ($user->hasRole('Admin') || $user->hasRole('Staff')));
 
         if ($request->filled('requester_type')) {
-            $query->where('requester_type', $request->requester_type);
+            $query->where('leave_requests.requester_type', $request->requester_type);
         }
 
         if ($request->filled('role') && $isAdmin) {
             $role = $request->role;
             if ($role === 'Student') {
-                $query->where('requester_type', 'student');
+                $query->where('leave_requests.requester_type', 'student');
             } else {
-                $query->where('requester_type', 'teacher')
-                    ->whereIn('requester_id', function ($q) use ($role) {
+                $query->where('leave_requests.requester_type', 'teacher')
+                    ->whereIn('leave_requests.requester_id', function ($q) use ($role) {
                         $q->select('id')->from('teachers')->where('role', $role);
                     });
             }
         }
 
         if ($request->filled('leave_type')) {
-            $query->where('leave_type', $request->leave_type);
+            $query->where('leave_requests.leave_type', $request->leave_type);
         }
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $query->where('leave_requests.status', $request->status);
         }
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
-                $q->where('requester_name', 'like', "%{$search}%")
-                    ->orWhere('requester_name_kh', 'like', "%{$search}%");
+                $q->where('leave_requests.requester_name', 'like', "%{$search}%")
+                    ->orWhere('leave_requests.requester_name_kh', 'like', "%{$search}%");
             });
         }
 
