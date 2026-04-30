@@ -12,10 +12,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use App\Services\Notification\TelegramService;
 
 class HolidayService
 {
     use ServiceTraceable;
+
+    public function __construct(private TelegramService $telegram)
+    {
+    }
 
     public function list(): Collection
     {
@@ -162,6 +167,36 @@ class HolidayService
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        $this->sendTelegramAnnouncement($holiday, $action);
+    }
+
+    private function sendTelegramAnnouncement(object $holiday, string $action): void
+    {
+        $status = $action === 'new' ? "📢 *New Holiday Announcement*" : "🔄 *Holiday Update Announcement*";
+        
+        $dateRange = $holiday->start_date === $holiday->end_date
+            ? $holiday->start_date
+            : "{$holiday->start_date} to {$holiday->end_date}";
+
+        $message = "{$status}\n\n"
+                 . "📍 *Name:* {$holiday->name}\n"
+                 . "🗓 *Date:* {$dateRange}\n"
+                 . "📂 *Type:* " . ucfirst($holiday->type) . "\n";
+
+        if (!empty($holiday->description)) {
+            $message .= "📝 *Description:* {$holiday->description}\n";
+        }
+
+        if (!empty($holiday->document_path)) {
+            $baseUrl = config('app.url');
+            $docUrl = $baseUrl . "/api/v1/holidays/{$holiday->id}/document";
+            $message .= "\n📄 *Document:* [View PDF]({$docUrl})\n";
+        }
+
+        $message .= "\n_Stay updated with Sarona Management System._";
+
+        $this->telegram->sendMessage($message);
     }
 
     private function notificationTitle(object $holiday, string $action): string
