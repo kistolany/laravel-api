@@ -453,6 +453,20 @@ class AuthService
         return $roleId;
     }
 
+    public function profile(User $user): User
+    {
+        return $this->trace(__FUNCTION__, function () use ($user): User {
+            $user->loadMissing('role.permissions');
+
+            if (!$user->teacher_id && $user->hasRole('Teacher')) {
+                $this->resolveTeacherForUser($user);
+                $user->refresh()->loadMissing('role.permissions');
+            }
+
+            return $user;
+        });
+    }
+
     private function identityFieldsForRole(int $roleId, array $data, ?User $existingUser = null): array
     {
         $roleName = Role::whereKey($roleId)->value('name');
@@ -513,6 +527,54 @@ class AuthService
         }
 
         return $user;
+    }
+
+    private function resolveTeacherForUser(User $user): ?\App\Models\Teacher
+    {
+        if ($user->teacher_id) {
+            return \App\Models\Teacher::find($user->teacher_id);
+        }
+
+        $username = trim((string) $user->username);
+        if ($username !== '') {
+            $teacher = \App\Models\Teacher::where('username', $username)
+                ->orWhere('email', $username)
+                ->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        $phone = trim((string) $user->phone);
+        if ($phone !== '') {
+            $teacher = \App\Models\Teacher::where('phone_number', $phone)->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        $fullName = strtolower(preg_replace('/\s+/', ' ', trim((string) $user->full_name)));
+        if ($fullName !== '') {
+            $teacher = \App\Models\Teacher::whereRaw(
+                "LOWER(TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')))) = ?",
+                [$fullName]
+            )->first();
+
+            if ($teacher) {
+                return $this->linkTeacherToUser($user, $teacher);
+            }
+        }
+
+        return null;
+    }
+
+    private function linkTeacherToUser(User $user, \App\Models\Teacher $teacher): \App\Models\Teacher
+    {
+        $user->forceFill(['teacher_id' => $teacher->id])->save();
+
+        return $teacher;
     }
 
     /**

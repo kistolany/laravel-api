@@ -187,6 +187,8 @@ Route::prefix('v1')->group(function () {
         // Class Schedule routes
         Route::get('class-schedules', [ClassScheduleController::class, 'index'])->middleware('permission:class_schedule.view');
         Route::post('class-schedules', [ClassScheduleController::class, 'store'])->middleware('permission:class_schedule.create');
+        Route::post('class-schedules/auto-generate', [ClassScheduleController::class, 'autoGenerate'])->middleware('permission:class_schedule.create');
+        Route::post('class-schedules/auto-generate/confirm', [ClassScheduleController::class, 'autoGenerateConfirm'])->middleware('permission:class_schedule.create');
         Route::get('class-schedules/class/{classId}', [ClassScheduleController::class, 'byClass'])->middleware('permission:class_schedule.view');
         Route::get('class-schedules/{id}', [ClassScheduleController::class, 'show'])->middleware('permission:class_schedule.view');
         Route::put('class-schedules/{id}', [ClassScheduleController::class, 'update'])->middleware('permission:class_schedule.update');

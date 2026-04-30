@@ -3,407 +3,94 @@
 namespace App\Http\Controllers\ApiController\Chat;
 
 use App\Http\Controllers\Controller;
-use App\Models\Conversation;
-use App\Models\Message;
-use App\Models\User;
+use App\Http\Requests\Chat\ChatActionRequest;
+use App\Http\Requests\Chat\ChatConversationRequest;
+use App\Http\Requests\Chat\ChatMessageListRequest;
+use App\Http\Requests\Chat\ChatSendMessageRequest;
+use App\Http\Requests\Chat\ChatUserSearchRequest;
+use App\Http\Resources\Chat\ChatResource;
+use App\Services\Chat\ChatService;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 
 class ChatController extends Controller
 {
-    // ── Helpers ──────────────────────────────────────────────────
+    use ApiResponseTrait;
 
-    private function success(mixed $data, string $message = 'OK', int $code = 200): JsonResponse
+    public function __construct(
+        private ChatService $service
+    ) {}
+
+    public function users(ChatUserSearchRequest $request): JsonResponse
     {
-        return response()->json([
-            'datetime'  => now()->toIso8601String(),
-            'timestamp' => now()->timestamp,
-            'status'    => true,
-            'code'      => $code,
-            'message'   => $message,
-            'data'      => $data,
-        ], $code);
+        return $this->success(ChatResource::collection($this->service->users($request->user(), $request->validated())));
     }
 
-    private function error(string $message, int $code = 400, mixed $data = null): JsonResponse
+    public function conversations(ChatActionRequest $request): JsonResponse
     {
-        return response()->json([
-            'datetime'  => now()->toIso8601String(),
-            'timestamp' => now()->timestamp,
-            'status'    => false,
-            'code'      => $code,
-            'message'   => $message,
-            'data'      => $data,
-        ], $code);
+        return $this->success(ChatResource::collection($this->service->conversations($request->user())));
     }
 
-    /**
-     * Format a user object for chat responses.
-     */
-    private function formatUser(User $user): array
+    public function findOrCreate(ChatConversationRequest $request): JsonResponse
     {
-        return [
-            'id'        => $user->id,
-            'username'  => $user->username,
-            'full_name' => $user->full_name ?? $user->username,
-            'image'     => $user->image ?? '',
-            'status'    => $user->status ?? 'Active',
-            'role'      => $user->role?->name ?? '',
-        ];
-    }
-
-    // ── GET /chat/users ─────────────────────────────────────────
-
-    /**
-     * List users available for chat (excludes current user).
-     * Supports ?search= query parameter.
-     */
-    public function users(Request $request): JsonResponse
-    {
-        $authId = $request->user()->id;
-        $search = $request->query('search', '');
-
-        $query = User::with('role')
-            ->where('id', '!=', $authId)
-            ->where('status', 'Active');
-
-        if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('full_name', 'like', "%{$search}%")
-                  ->orWhere('username', 'like', "%{$search}%");
-            });
-        }
-
-        $users = $query->orderBy('full_name')
-                       ->limit(50)
-                       ->get()
-                       ->map(fn (User $u) => $this->formatUser($u));
-
-        return $this->success($users);
-    }
-
-    // ── GET /chat/conversations ─────────────────────────────────
-
-    /**
-     * List authenticated user's conversations, with last message & unread count.
-     */
-    public function conversations(Request $request): JsonResponse
-    {
-        $authId = $request->user()->id;
-
-        $conversations = Conversation::forUser($authId)
-            ->with(['userOne:id,username,full_name,image,status', 'userTwo:id,username,full_name,image,status'])
-            ->orderByDesc('last_message_at')
-            ->get()
-            ->map(function (Conversation $conv) use ($authId) {
-                $otherUser = $conv->user_one_id === $authId ? $conv->userTwo : $conv->userOne;
-                
-                $isUserOne = ($conv->user_one_id === $authId);
-                $lastCleared = $isUserOne ? $conv->user_one_last_cleared_at : $conv->user_two_last_cleared_at;
-
-                $msgQuery = $conv->messages()->unreadFor($authId);
-                if ($lastCleared) {
-                    $msgQuery->where('created_at', '>', $lastCleared);
-                }
-                $unreadCount = $msgQuery->count();
-
-                $latestMsgQuery = $conv->messages()->orderByDesc('created_at');
-                if ($lastCleared) {
-                    $latestMsgQuery->where('created_at', '>', $lastCleared);
-                }
-                $latestMsg = $latestMsgQuery->first();
-
-                return [
-                    'id'             => $conv->id,
-                    'other_user'     => $otherUser ? [
-                        'id'        => $otherUser->id,
-                        'username'  => $otherUser->username,
-                        'full_name' => $otherUser->full_name ?? $otherUser->username,
-                        'image'     => $otherUser->image ?? '',
-                        'status'    => $otherUser->status ?? 'Active',
-                    ] : null,
-                    'last_message'   => $latestMsg ? [
-                        'id'         => $latestMsg->id,
-                        'body'       => $latestMsg->body,
-                        'sender_id'  => $latestMsg->sender_id,
-                        'created_at' => $latestMsg->created_at?->toIso8601String(),
-                    ] : null,
-                    'unread_count'   => $unreadCount,
-                    'is_muted'       => ($conv->user_one_id === $authId) ? (bool)$conv->user_one_muted : (bool)$conv->user_two_muted,
-                    'last_message_at' => $conv->last_message_at?->toIso8601String(),
-                    'created_at'     => $conv->created_at?->toIso8601String(),
-                ];
-            });
-
-        return $this->success($conversations);
-    }
-
-    // ── POST /chat/conversations ────────────────────────────────
-
-    /**
-     * Find or create a conversation with another user.
-     */
-    public function findOrCreate(Request $request): JsonResponse
-    {
-        $request->validate([
-            'user_id' => 'required|integer|exists:users,id',
-        ]);
-
-        $authId  = $request->user()->id;
-        $otherId = (int) $request->input('user_id');
-
-        if ($authId === $otherId) {
-            return $this->error('Cannot start a conversation with yourself.', 422);
-        }
-
-        // Normalize ordering so (1,2) and (2,1) map to the same row
-        $userOneId = min($authId, $otherId);
-        $userTwoId = max($authId, $otherId);
-
-        $conversation = Conversation::firstOrCreate(
-            ['user_one_id' => $userOneId, 'user_two_id' => $userTwoId],
+        return $this->success(
+            new ChatResource($this->service->findOrCreate($request->user(), $request->validated('user_id'))),
+            'Conversation ready.'
         );
-
-        $conversation->load(['userOne:id,username,full_name,image,status', 'userTwo:id,username,full_name,image,status']);
-
-        $otherUser = $conversation->user_one_id === $authId
-            ? $conversation->userTwo
-            : $conversation->userOne;
-
-        return $this->success([
-            'id'         => $conversation->id,
-            'other_user' => $otherUser ? [
-                'id'        => $otherUser->id,
-                'username'  => $otherUser->username,
-                'full_name' => $otherUser->full_name ?? $otherUser->username,
-                'image'     => $otherUser->image ?? '',
-                'status'    => $otherUser->status ?? 'Active',
-            ] : null,
-            'is_muted'   => ($conversation->user_one_id === $authId) ? (bool)$conversation->user_one_muted : (bool)$conversation->user_two_muted,
-            'created_at' => $conversation->created_at?->toIso8601String(),
-        ], 'Conversation ready.');
     }
 
-    // ── GET /chat/conversations/{id}/messages ───────────────────
-
-    /**
-     * Paginated messages for a conversation. Privacy-enforced.
-     */
-    public function messages(Request $request, int $id): JsonResponse
+    public function messages(ChatMessageListRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $isUserOne = ($conversation->user_one_id === $authId);
-        $lastCleared = $isUserOne ? $conversation->user_one_last_cleared_at : $conversation->user_two_last_cleared_at;
-
-        $perPage = min((int) $request->query('per_page', 50), 100);
-
-        $query = $conversation->messages()
-            ->with('sender:id,username,full_name,image')
-            ->orderByDesc('created_at');
-
-        if ($lastCleared) {
-            $query->where('created_at', '>', $lastCleared);
-        }
-
-        $messages = $query->paginate($perPage);
-
-        $items = collect($messages->items())->map(fn (Message $msg) => [
-            'id'         => $msg->id,
-            'body'       => $msg->body,
-            'sender_id'  => $msg->sender_id,
-            'sender'     => $msg->sender ? [
-                'id'        => $msg->sender->id,
-                'username'  => $msg->sender->username,
-                'full_name' => $msg->sender->full_name ?? $msg->sender->username,
-                'image'     => $msg->sender->image ?? '',
-            ] : null,
-            'read_at'    => $msg->read_at?->toIso8601String(),
-            'created_at' => $msg->created_at?->toIso8601String(),
-        ]);
-
-        return $this->success([
-            'items'      => $items,
-            'pagination' => [
-                'total'        => $messages->total(),
-                'per_page'     => $messages->perPage(),
-                'current_page' => $messages->currentPage(),
-                'total_pages'  => $messages->lastPage(),
-            ],
-        ]);
+        return $this->success($this->service->messages($request->user(), $id, $request->validated()));
     }
 
-    // ── POST /chat/conversations/{id}/messages ──────────────────
-
-    /**
-     * Send a message in a conversation. Privacy-enforced.
-     */
-    public function sendMessage(Request $request, int $id): JsonResponse
+    public function sendMessage(ChatSendMessageRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $request->validate([
-            'body' => 'required|string|max:5000',
-        ]);
-
-        $message = $conversation->messages()->create([
-            'sender_id' => $authId,
-            'body'      => $request->input('body'),
-        ]);
-
-        // Update last_message_at timestamp on the conversation
-        $conversation->update(['last_message_at' => $message->created_at]);
-
-        $message->load('sender:id,username,full_name,image');
-
-        return $this->success([
-            'id'         => $message->id,
-            'body'       => $message->body,
-            'sender_id'  => $message->sender_id,
-            'sender'     => $message->sender ? [
-                'id'        => $message->sender->id,
-                'username'  => $message->sender->username,
-                'full_name' => $message->sender->full_name ?? $message->sender->username,
-                'image'     => $message->sender->image ?? '',
-            ] : null,
-            'read_at'    => null,
-            'created_at' => $message->created_at?->toIso8601String(),
-        ], 'Message sent.', 201);
+        return $this->success(
+            new ChatResource($this->service->sendMessage($request->user(), $id, $request->validated())),
+            'Message sent.'
+        );
     }
 
-    // ── PATCH /chat/conversations/{id}/read ─────────────────────
-
-    /**
-     * Mark all unread messages in a conversation as read.
-     */
-    public function markRead(Request $request, int $id): JsonResponse
+    public function markRead(ChatActionRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $updated = $conversation->messages()
-            ->unreadFor($authId)
-            ->update(['read_at' => Carbon::now()]);
-
-        return $this->success([
-            'marked_count' => $updated,
-        ], 'Messages marked as read.');
+        return $this->success(
+            new ChatResource($this->service->markRead($request->user(), $id)),
+            'Messages marked as read.'
+        );
     }
 
-    // ── GET /chat/unread-count ──────────────────────────────────
-
-    /**
-     * Total unread message count across all conversations.
-     */
-    public function unreadCount(Request $request): JsonResponse
+    public function unreadCount(ChatActionRequest $request): JsonResponse
     {
-        $authId = $request->user()->id;
-
-        $conversationIds = Conversation::forUser($authId)->pluck('id');
-
-        $count = Message::whereIn('conversation_id', $conversationIds)
-            ->unreadFor($authId)
-            ->count();
-
-        return $this->success([
-            'unread_count' => $count,
-        ]);
+        return $this->success(new ChatResource($this->service->unreadCount($request->user())));
     }
 
-    /**
-     * Delete a message. Only the sender can delete their own message.
-     */
-    public function deleteMessage(Request $request, int $messageId): JsonResponse
+    public function deleteMessage(ChatActionRequest $request, int $messageId): JsonResponse
     {
-        $authId = $request->user()->id;
-        $message = Message::find($messageId);
-
-        if (!$message) {
-            return $this->error('Message not found.', 404);
-        }
-
-        if ($message->sender_id !== $authId && !$request->user()->hasRole('Admin')) {
-            return $this->error('Unauthorized to delete this message.', 403);
-        }
-
-        $message->delete();
+        $this->service->deleteMessage($request->user(), $messageId);
 
         return $this->success(null, 'Message deleted successfully.');
     }
 
-    public function clearConversation(Request $request, int $id): JsonResponse
+    public function clearConversation(ChatActionRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $isUserOne = ($conversation->user_one_id === $authId);
-        $field = $isUserOne ? 'user_one_last_cleared_at' : 'user_two_last_cleared_at';
-        
-        $conversation->$field = now();
-        $conversation->save();
+        $this->service->clearConversation($request->user(), $id);
 
         return $this->success(null, 'Conversation cleared for you.');
     }
 
-    /**
-     * Delete a conversation entirely.
-     */
-    public function destroyConversation(Request $request, int $id): JsonResponse
+    public function destroyConversation(ChatActionRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $conversation->delete();
+        $this->service->destroyConversation($request->user(), $id);
 
         return $this->success(null, 'Conversation deleted.');
     }
 
-    /**
-     * Toggle mute status for the current user in a conversation.
-     */
-    public function toggleMute(Request $request, int $id): JsonResponse
+    public function toggleMute(ChatActionRequest $request, int $id): JsonResponse
     {
-        $authId = $request->user()->id;
-        $conversation = Conversation::find($id);
-
-        if (!$conversation || !$conversation->hasParticipant($authId)) {
-            return $this->error('Conversation not found.', 404);
-        }
-
-        $isUserOne = ($conversation->user_one_id === $authId);
-        $field = $isUserOne ? 'user_one_muted' : 'user_two_muted';
-        
-        $conversation->$field = !$conversation->$field;
-        $conversation->save();
-
-        return $this->success([
-            'is_muted' => (bool)$conversation->$field
-        ], 'Mute status toggled.');
+        return $this->success(
+            new ChatResource($this->service->toggleMute($request->user(), $id)),
+            'Mute status toggled.'
+        );
     }
 }

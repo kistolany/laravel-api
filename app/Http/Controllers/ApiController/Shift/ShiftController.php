@@ -5,7 +5,6 @@ namespace App\Http\Controllers\ApiController\Shift;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Shift\ShiftRequest;
 use App\Http\Resources\Shift\ShiftResource;
-use App\Models\Shift;
 use App\Traits\ApiResponseTrait;
 
 
@@ -19,13 +18,12 @@ class ShiftController extends Controller
 
     public function index()
     {
-        Shift::all();
         return $this->success($this->service->index());
     }
 
     public function store(ShiftRequest $request)
     {
-        $this->service->create($request->all());
+        $this->service->create($request->validated());
         return $this->success("Create shift success fully !");
     }
 
@@ -39,7 +37,7 @@ class ShiftController extends Controller
 
     public function update(ShiftRequest $request, $id)
     {
-        $this->service->update($id, $request->all());
+        $this->service->update($id, $request->validated());
         return $this->success("Shift updated successfully!");
     }
 

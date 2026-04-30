@@ -8,7 +8,9 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\ClassSchedule\ClassScheduleResource;
 use App\Models\ClassSchedule;
+use App\Models\TeacherAvailability;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class ClassScheduleService extends BaseService
 {
@@ -73,5 +75,89 @@ class ClassScheduleService extends BaseService
 
             return $this->paginateResponse($query, ClassScheduleResource::class);
         });
+    }
+
+    public function autoGeneratePreview(array $slots): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($slots): array {
+            $allAvailability = TeacherAvailability::with(['teacher'])->get();
+            $assigned = [];
+            $scheduled = [];
+            $conflicts = [];
+            $unmatched = [];
+
+            foreach ($slots as $slot) {
+                $candidates = $allAvailability->filter(
+                    fn ($availability) =>
+                        $availability->subject_id == $slot['subject_id']
+                        && $availability->shift_id == $slot['shift_id']
+                        && $availability->day_of_week == $slot['day_of_week']
+                );
+
+                if ($candidates->isEmpty()) {
+                    $unmatched[] = $slot;
+                    continue;
+                }
+
+                $chosenAvailability = $candidates->first(
+                    fn ($availability) => !isset($assigned[$this->busyKey($availability->teacher_id, $slot)])
+                );
+                $isConflict = $chosenAvailability === null;
+                $chosenAvailability ??= $candidates->first();
+
+                $assigned[$this->busyKey($chosenAvailability->teacher_id, $slot)] = true;
+                $row = [
+                    ...$slot,
+                    'teacher_id' => $chosenAvailability->teacher_id,
+                    'teacher_name' => trim($chosenAvailability->teacher->first_name . ' ' . $chosenAvailability->teacher->last_name),
+                ];
+
+                if ($isConflict) {
+                    $conflicts[] = [
+                        ...$row,
+                        'conflict_reason' => 'Teacher already assigned on this day & shift',
+                    ];
+                    continue;
+                }
+
+                $scheduled[] = $row;
+            }
+
+            return compact('scheduled', 'conflicts', 'unmatched');
+        });
+    }
+
+    public function autoGenerateConfirm(array $schedules)
+    {
+        return $this->trace(__FUNCTION__, function () use ($schedules) {
+            return DB::transaction(function () use ($schedules) {
+                $ids = [];
+
+                foreach ($schedules as $scheduleData) {
+                    $schedule = ClassSchedule::create([
+                        'class_id' => $scheduleData['class_id'],
+                        'subject_id' => $scheduleData['subject_id'],
+                        'teacher_id' => $scheduleData['teacher_id'],
+                        'shift_id' => $scheduleData['shift_id'],
+                        'day_of_week' => $scheduleData['day_of_week'],
+                        'room' => $scheduleData['room'] ?? null,
+                        'academic_year' => $scheduleData['academic_year'],
+                        'year_level' => $scheduleData['year_level'],
+                        'semester' => $scheduleData['semester'],
+                    ]);
+
+                    $ids[] = $schedule->id;
+                }
+
+                return ClassSchedule::with(['classroom', 'subject', 'teacher', 'shift'])
+                    ->whereIn('id', $ids)
+                    ->get();
+            });
+        });
+    }
+
+    private function busyKey(int $teacherId, array $slot): string
+    {
+        return "{$teacherId}:{$slot['day_of_week']}:{$slot['shift_id']}";
     }
 }

@@ -6,6 +6,7 @@ use App\Models\AttendanceSession;
 use App\Models\Classes;
 use App\Models\Faculty;
 use App\Models\Major;
+use App\Models\Permission;
 use App\Models\Role;
 use App\Models\Shift;
 use App\Models\Students;
@@ -25,7 +26,7 @@ class TeacherRoleAccessTest extends TestCase
         parent::setUp();
 
         config([
-            'jwt.secret' => 'testing-secret-key',
+            'jwt.secret' => str_repeat('testing-secret-key-', 4),
             'jwt.issuer' => 'http://localhost',
         ]);
     }
@@ -34,14 +35,12 @@ class TeacherRoleAccessTest extends TestCase
     {
         $teacher = $this->createTeacherUser();
         $faculty = Faculty::create([
-            'name_kh' => 'Science KH',
-            'name_eg' => 'Science',
+            'name' => 'Science',
         ]);
 
         Major::create([
             'faculty_id' => $faculty->id,
-            'name_kh' => 'Computer Science KH',
-            'name_eg' => 'Computer Science',
+            'name' => 'Computer Science',
         ]);
 
         $response = $this
@@ -51,23 +50,21 @@ class TeacherRoleAccessTest extends TestCase
         $response
             ->assertOk()
             ->assertJsonPath('code', 200)
-            ->assertJsonPath('data.items.0.name_eg', 'Computer Science');
+            ->assertJsonPath('data.items.0.name', 'Computer Science');
     }
 
     public function test_teacher_cannot_create_major(): void
     {
         $teacher = $this->createTeacherUser();
         $faculty = Faculty::create([
-            'name_kh' => 'Management KH',
-            'name_eg' => 'Management',
+            'name' => 'Management',
         ]);
 
         $response = $this
             ->withHeader('Authorization', 'Bearer '.$this->issueToken($teacher))
             ->postJson('/api/v1/majors', [
                 'faculty_id' => $faculty->id,
-                'name_kh' => 'Marketing KH',
-                'name_eg' => 'Marketing',
+                'name' => 'Marketing',
             ]);
 
         $response->assertForbidden();
@@ -88,9 +85,9 @@ class TeacherRoleAccessTest extends TestCase
             ]);
 
         $response
-            ->assertOk()
-            ->assertJsonPath('data.success', true)
-            ->assertJsonPath('data.data.class_id', $class->id);
+            ->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.class_id', $class->id);
     }
 
     public function test_teacher_can_mark_and_update_attendance_records(): void
@@ -105,6 +102,7 @@ class TeacherRoleAccessTest extends TestCase
             'phone' => '012345678',
             'email' => 'student1@example.com',
             'id_card_number' => 'ID-0001',
+            'grade' => 'A',
             'short_docs_status' => false,
         ]);
 
@@ -140,7 +138,7 @@ class TeacherRoleAccessTest extends TestCase
                     'status' => 'Present',
                 ],
             ],
-        ])->assertOk()->assertJsonPath('data.success', true);
+        ])->assertOk()->assertJsonPath('success', true);
 
         $this->assertDatabaseHas('attendance_records', [
             'attendance_session_id' => $session->id,
@@ -157,7 +155,7 @@ class TeacherRoleAccessTest extends TestCase
                     'status' => 'Late',
                 ],
             ],
-        ])->assertOk()->assertJsonPath('data.success', true);
+        ])->assertOk()->assertJsonPath('success', true);
 
         $this->assertDatabaseHas('attendance_records', [
             'attendance_session_id' => $session->id,
@@ -172,6 +170,10 @@ class TeacherRoleAccessTest extends TestCase
             'name' => 'Teacher',
             'description' => 'Teacher attendance and major listing access',
         ]);
+        $permissions = collect(['major.view', 'attendance.create', 'attendance.record'])
+            ->map(fn (string $name) => Permission::create(['name' => $name]));
+
+        $role->permissions()->attach($permissions->pluck('id')->all());
 
         return User::factory()->create([
             'role_id' => $role->id,
@@ -186,26 +188,22 @@ class TeacherRoleAccessTest extends TestCase
     private function createAttendanceContext(): array
     {
         $faculty = Faculty::create([
-            'name_kh' => 'Science KH',
-            'name_eg' => 'Science',
+            'name' => 'Science',
         ]);
         $major = Major::create([
             'faculty_id' => $faculty->id,
-            'name_kh' => 'Computer Science KH',
-            'name_eg' => 'Computer Science',
+            'name' => 'Computer Science',
         ]);
         $shift = Shift::create([
-            'name_kh' => 'Morning KH',
-            'name_en' => 'Morning',
+            'name' => 'Morning',
             'time_range' => '08:00-11:00',
         ]);
         $subject = Subject::create([
             'subject_Code' => 'CS101',
-            'name_kh' => 'Intro to CS KH',
-            'name_eg' => 'Intro to CS',
+            'name' => 'Intro to CS',
         ]);
         $class = Classes::create([
-            'code' => 'CS1-M1',
+            'name' => 'CS1-M1',
             'major_id' => $major->id,
             'shift_id' => $shift->id,
             'academic_year' => '2025-2026',

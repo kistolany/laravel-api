@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\ApiController\Teacher;
 
 use App\Enums\ResponseStatus;
-use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Teacher\TeacherArchiveRequest;
+use App\Http\Requests\Teacher\TeacherIndexRequest;
 use App\Http\Requests\Teacher\TeacherRequest;
 use App\Http\Resources\Teacher\TeacherAuthResource;
 use App\Http\Resources\Teacher\TeacherResource;
@@ -19,117 +20,81 @@ class TeacherAuthController extends Controller
 {
     use ApiResponseTrait;
 
-    public function __construct(private TeacherAuthService $service)
-    {
-    }
+    public function __construct(
+        private TeacherAuthService $service
+    ) {}
 
-    public function index(Request $request): JsonResponse
+    public function index(TeacherIndexRequest $request): JsonResponse
     {
-        $teachers = \App\Models\Teacher::with(['major', 'subject'])
-            ->when($request->boolean('archived'), function ($query) {
-                $query->onlyTrashed();
-            })
-            ->when($request->filled('status'), function ($query) use ($request) {
-                $status = strtolower((string) $request->query('status'));
-                $query->where('status', $status === 'inactive' ? 'inactive' : 'active');
-            }, function ($query) use ($request) {
-                if (!$request->boolean('archived')) {
-                    $query->where('status', 'active');
-                }
-            })
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return $this->success(TeacherResource::collection($teachers), 'Teachers retrieved successfully.');
+        return $this->success(
+            TeacherResource::collection($this->service->index($request->validated())),
+            'Teachers retrieved successfully.'
+        );
     }
 
     public function archived(): JsonResponse
     {
-        $teachers = \App\Models\Teacher::with(['major', 'subject'])
-            ->onlyTrashed()
-            ->orderBy('deleted_at', 'desc')
-            ->get();
-
-        return $this->success(TeacherResource::collection($teachers), 'Archived teachers retrieved successfully.');
+        return $this->success(
+            TeacherResource::collection($this->service->archived()),
+            'Archived teachers retrieved successfully.'
+        );
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(TeacherArchiveRequest $request, int $id): JsonResponse
     {
-        $this->service->archive($id, request()->user()?->id, request('delete_reason'));
+        $this->service->archive($id, $request->user()?->id, $request->validated('delete_reason'));
 
         return $this->success(null, 'Teacher archived successfully.');
     }
 
     public function restore(int $id): JsonResponse
     {
-        $teacher = $this->service->restore($id);
-
-        return $this->success(new TeacherResource($teacher), 'Teacher restored successfully.');
+        return $this->success(
+            new TeacherResource($this->service->restore($id)),
+            'Teacher restored successfully.'
+        );
     }
 
     public function register(TeacherRequest $request): JsonResponse
     {
-        try {
-            $teacher = $this->service->register($request->validated());
-        } catch (ApiException $e) {
-            return $e->render($request);
-        }
-
-        return $this->success(TeacherAuthResource::teacher($teacher), 'Teacher registered successfully.');
+        return $this->success(
+            TeacherAuthResource::teacher($this->service->register($request->validated())),
+            'Teacher registered successfully.'
+        );
     }
 
     public function update(TeacherRequest $request, int $id): JsonResponse
     {
-        try {
-            $data = $request->validated();
-            if (!$request->user()?->hasPermission('teacher.update')) {
-                $data = array_intersect_key($data, array_flip(['status']));
-            }
-
-            $teacher = $this->service->update($id, $data);
-        } catch (ApiException $e) {
-            return $e->render($request);
-        }
-
-        return $this->success(TeacherResource::collection([\App\Models\Teacher::find($id)]), 'Teacher updated successfully.');
+        return $this->success(
+            new TeacherResource($this->service->updateForUser($id, $request->validated(), $request->user())),
+            'Teacher updated successfully.'
+        );
     }
 
     public function uploadImage(TeacherRequest $request): JsonResponse
     {
-        try {
-            $url = $this->service->uploadImageOrFail($request->file('image'));
-        } catch (ApiException $e) {
-            return $e->render($request);
-        } catch (\Exception $e) {
-            return $this->error($e->getMessage(), ResponseStatus::INTERNAL_SERVER_ERROR);
-        }
-
-        return $this->success(TeacherAuthResource::uploadImage($url), 'Image uploaded successfully.');
+        return $this->success(
+            TeacherAuthResource::uploadImage($this->service->uploadImageOrFail($request->file('image'))),
+            'Image uploaded successfully.'
+        );
     }
 
     public function verifyOtp(TeacherRequest $request): JsonResponse
     {
-        try {
-            $teacher = $this->service->verifyOtp(
-                $request->validated('email'),
-                $request->validated('otp_code')
-            );
-        } catch (ApiException $e) {
-            return $e->render($request);
-        }
-
-        return $this->success(TeacherAuthResource::teacher($teacher), 'Teacher email verified successfully.');
+        return $this->success(
+            TeacherAuthResource::teacher(
+                $this->service->verifyOtp($request->validated('email'), $request->validated('otp_code'))
+            ),
+            'Teacher email verified successfully.'
+        );
     }
 
     public function resendOtp(TeacherRequest $request): JsonResponse
     {
-        try {
-            $teacher = $this->service->resendOtp($request->validated('email'));
-        } catch (ApiException $e) {
-            return $e->render($request);
-        }
-
-        return $this->success(TeacherAuthResource::teacher($teacher), 'OTP has been resent successfully.');
+        return $this->success(
+            TeacherAuthResource::teacher($this->service->resendOtp($request->validated('email'))),
+            'OTP has been resent successfully.'
+        );
     }
 
     public function login(TeacherRequest $request): JsonResponse
@@ -145,8 +110,6 @@ class TeacherAuthController extends Controller
             return $this->error('account not exist', ResponseStatus::UNAUTHORIZED);
         } catch (AuthorizationException $e) {
             return $this->error($e->getMessage(), ResponseStatus::FORBIDDEN);
-        } catch (ApiException $e) {
-            return $e->render($request);
         }
 
         return $this->success(TeacherAuthResource::tokens($tokens), 'Teacher login successful.');
@@ -155,10 +118,8 @@ class TeacherAuthController extends Controller
     public function refresh(TeacherRequest $request): JsonResponse
     {
         try {
-            $data = $request->validated();
-
             $tokens = $this->service->refresh(
-                $data['refresh_token'],
+                $request->validated('refresh_token'),
                 $request->ip(),
                 $request->userAgent()
             );
@@ -166,8 +127,6 @@ class TeacherAuthController extends Controller
             return $this->error('Invalid refresh token.', ResponseStatus::UNAUTHORIZED);
         } catch (AuthorizationException $e) {
             return $this->error($e->getMessage(), ResponseStatus::FORBIDDEN);
-        } catch (ApiException $e) {
-            return $e->render($request);
         }
 
         return $this->success(TeacherAuthResource::tokens($tokens), 'Teacher token refreshed.');
@@ -175,16 +134,15 @@ class TeacherAuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        $teacher = $request->user()->loadMissing(['major', 'subject']);
-
-        return $this->success(new TeacherResource($teacher), 'Teacher retrieved successfully.');
+        return $this->success(
+            new TeacherResource($request->user()->loadMissing(['major', 'subject'])),
+            'Teacher retrieved successfully.'
+        );
     }
 
     public function logout(TeacherRequest $request): JsonResponse
     {
-        $data = $request->validated();
-
-        $this->service->logout($request->user(), $data['refresh_token'] ?? null);
+        $this->service->logout($request->user(), $request->validated('refresh_token'));
 
         return $this->success(null, 'Teacher logged out.');
     }
@@ -198,12 +156,7 @@ class TeacherAuthController extends Controller
 
     public function revoke(TeacherRequest $request): JsonResponse
     {
-        try {
-            $data = $request->validated();
-            $this->service->revokeRefreshTokenOrFail($request->user(), $data['refresh_token']);
-        } catch (ApiException $e) {
-            return $e->render($request);
-        }
+        $this->service->revokeRefreshTokenOrFail($request->user(), $request->validated('refresh_token'));
 
         return $this->success(null, 'Teacher refresh token revoked.');
     }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\ApiController\Student;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Student\StudentImageRequest;
 use App\Http\Requests\Student\StudentRequest;
+use App\Http\Requests\Student\StudentStatusRequest;
 use App\Http\Requests\Student\StudentTypeRequest;
 use App\Http\Resources\Student\StudentResource;
 use App\Http\Resources\Student\StudentClassResource;
@@ -82,8 +83,7 @@ class StudentController extends Controller
      */
     public function store(StudentRequest $request) 
     {
-        // Using Request or a custom StudentRequest for validation
-        $student = $this->service->create($request->all());
+        $student = $this->service->create($request->validated());
         
         return $this->success(new StudentResource($student), "Student created successfully!");
     }
@@ -102,7 +102,7 @@ class StudentController extends Controller
      */
     public function update(StudentRequest $request, $id)
     {
-        $student = $this->service->update($id, $request->all());
+        $student = $this->service->update($id, $request->validated());
         
         return $this->success(
             new StudentResource($student), 
@@ -140,11 +140,9 @@ class StudentController extends Controller
     /**
      * Update student status to enable or disable.
      */
-    public function updateStatus($id)
+    public function updateStatus(StudentStatusRequest $request, $id)
     {
-        $status = request()->validate([
-            'status' => 'required|in:active,inactive,enable,disable',
-        ])['status'];
+        $status = $request->validated('status');
 
         $student = $this->service->setStatus($id, $status);
         return $this->success(new StudentResource($student), "Student status updated to {$status}.");

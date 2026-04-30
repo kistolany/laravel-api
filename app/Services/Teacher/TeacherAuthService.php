@@ -13,7 +13,9 @@ use App\Models\User;
 use App\Models\Role;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -106,6 +108,36 @@ class TeacherAuthService
         });
     }
 
+    public function index(array $filters = []): Collection
+    {
+        return $this->trace(__FUNCTION__, function () use ($filters): Collection {
+            $archived = filter_var($filters['archived'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+            return Teacher::with(['major', 'subject'])
+                ->when($archived, fn ($query) => $query->onlyTrashed())
+                ->when(isset($filters['status']), function ($query) use ($filters) {
+                    $status = strtolower((string) $filters['status']);
+                    $query->where('status', $status === 'inactive' ? 'inactive' : 'active');
+                }, function ($query) use ($archived) {
+                    if (!$archived) {
+                        $query->where('status', 'active');
+                    }
+                })
+                ->orderBy('created_at', 'desc')
+                ->get();
+        });
+    }
+
+    public function archived(): Collection
+    {
+        return $this->trace(__FUNCTION__, function (): Collection {
+            return Teacher::with(['major', 'subject'])
+                ->onlyTrashed()
+                ->orderBy('deleted_at', 'desc')
+                ->get();
+        });
+    }
+
     private function generateInternalUsername(array $data): string
     {
         $base = 'teacher-profile-' . Str::slug((string) ($data['teacher_id'] ?? ''));
@@ -182,6 +214,17 @@ class TeacherAuthService
             }
 
             return $teacher->fresh(['major', 'subject']);
+        });
+    }
+
+    public function updateForUser(int $id, array $data, ?Authenticatable $user): Teacher
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $data, $user): Teacher {
+            if (!$user || !method_exists($user, 'hasPermission') || !$user->hasPermission('teacher.update')) {
+                $data = array_intersect_key($data, array_flip(['status']));
+            }
+
+            return $this->update($id, $data);
         });
     }
 

@@ -6,6 +6,11 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class ShiftRequest extends FormRequest
 {
+    public function authorize(): bool
+    {
+        return true;
+    }
+
     public function rules(): array
     {
         return [
@@ -14,5 +19,4 @@ class ShiftRequest extends FormRequest
         ];
     }
 }
-
 
