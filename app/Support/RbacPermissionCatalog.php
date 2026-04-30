@@ -190,6 +190,8 @@ final class RbacPermissionCatalog
             'notification.view',
             'notification.create',
             'notification.delete',
+
+            'tool.view',
         ];
     }
 
