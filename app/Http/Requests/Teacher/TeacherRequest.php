@@ -18,12 +18,6 @@ class TeacherRequest extends FormRequest
             'register' => $this->registerRules(),
             'update' => $this->updateRules(),
             'uploadImage' => $this->uploadImageRules(),
-            'verifyOtp' => $this->verifyOtpRules(),
-            'resendOtp' => $this->resendOtpRules(),
-            'login' => $this->loginRules(),
-            'refresh' => $this->refreshRules(),
-            'logout' => $this->logoutRules(),
-            'revoke' => $this->revokeRules(),
             default => [],
         };
     }
@@ -36,7 +30,7 @@ class TeacherRequest extends FormRequest
             'last_name'       => 'required|string|max:255',
             'gender'          => 'required|in:Male,Female,Other',
             'major_id'        => 'required|integer|exists:majors,id',
-            'subject_id'      => 'required|integer|exists:subjects,id',
+            'subject_id'      => 'nullable|integer|exists:subjects,id',
             'email'           => ['required', 'email', 'max:255', Rule::unique('teachers', 'email')],
             'username'        => [
                 'nullable',
@@ -59,6 +53,8 @@ class TeacherRequest extends FormRequest
             'phone_number'    => 'nullable|string|max:50',
             'telegram'        => 'nullable|string|max:255',
             'image'           => 'nullable',
+            'cv_file'         => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+            'id_card_file'    => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
             // optional emergency
             'emergency_name'  => 'nullable|string|max:255',
             'emergency_phone' => 'nullable|string|max:50',
@@ -86,7 +82,7 @@ class TeacherRequest extends FormRequest
             'last_name'       => 'sometimes|required|string|max:255',
             'gender'          => 'sometimes|required|in:Male,Female,Other',
             'major_id'        => 'sometimes|required|integer|exists:majors,id',
-            'subject_id'      => 'sometimes|required|integer|exists:subjects,id',
+            'subject_id'      => 'nullable|integer|exists:subjects,id',
             'email'           => ['sometimes', 'required', 'email', 'max:255', Rule::unique('teachers', 'email')->ignore($id)],
             'username'        => ['sometimes', 'required', 'string', 'max:255', Rule::unique('teachers', 'username')->ignore($id)],
             'password'        => 'nullable|string|min:6|max:255',
@@ -101,6 +97,8 @@ class TeacherRequest extends FormRequest
             'phone_number'    => 'nullable|string|max:50',
             'telegram'        => 'nullable|string|max:255',
             'image'           => 'nullable',
+            'cv_file'         => 'nullable|file|mimes:pdf,doc,docx|max:5120',
+            'id_card_file'    => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
             'emergency_name'  => 'nullable|string|max:255',
             'emergency_phone' => 'nullable|string|max:50',
             'position'        => 'nullable|string|max:50',
@@ -123,48 +121,5 @@ class TeacherRequest extends FormRequest
         ];
     }
 
-    private function verifyOtpRules(): array
-    {
-        return [
-            'email' => 'required|email|max:255',
-            'otp_code' => 'required|digits:6',
-        ];
-    }
-
-    private function resendOtpRules(): array
-    {
-        return [
-            'email' => 'required|email|max:255',
-        ];
-    }
-
-    private function loginRules(): array
-    {
-        return [
-            'login' => 'required|string|max:255',
-            'password' => 'required|string|max:255',
-        ];
-    }
-
-    private function refreshRules(): array
-    {
-        return [
-            'refresh_token' => 'required|string',
-        ];
-    }
-
-    private function logoutRules(): array
-    {
-        return [
-            'refresh_token' => 'nullable|string',
-        ];
-    }
-
-    private function revokeRules(): array
-    {
-        return [
-            'refresh_token' => 'required|string',
-        ];
-    }
 }
 

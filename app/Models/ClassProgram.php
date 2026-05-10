@@ -9,7 +9,13 @@ class ClassProgram extends Model
 {
     protected $table = 'class_programs';
 
-    protected $fillable = ['class_id', 'major_id', 'shift_id', 'year_level', 'semester'];
+    protected $fillable = ['class_id', 'major_id', 'shift_id', 'year_level', 'semester', 'academic_year', 'section', 'max_students'];
+
+    protected $casts = [
+        'year_level' => 'integer',
+        'semester' => 'integer',
+        'max_students' => 'integer',
+    ];
 
     public function major(): BelongsTo
     {

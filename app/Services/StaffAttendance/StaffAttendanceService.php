@@ -184,8 +184,8 @@ class StaffAttendanceService extends BaseService
             'name' => $user->full_name ?: $user->username ?: 'Unknown staff',
             'username' => $user->username,
             'role' => $user->role?->name,
-            'department' => $user->department,
-            'position' => $user->position,
+            'department' => $user->staffProfile?->department,
+            'position' => $user->staffProfile?->position,
             'phone' => $user->phone,
             'image' => $user->image,
             'attendance' => $record ? [
@@ -213,8 +213,8 @@ class StaffAttendanceService extends BaseService
             'name' => $user->full_name ?: $user->username ?: 'Unknown staff',
             'username' => $user->username,
             'role' => $user->role?->name,
-            'department' => $user->department,
-            'position' => $user->position,
+            'department' => $user->staffProfile?->department,
+            'position' => $user->staffProfile?->position,
             'image' => $user->image,
             'total' => $total,
             'present' => $present,
@@ -240,8 +240,8 @@ class StaffAttendanceService extends BaseService
     private function staffUsersQuery(): Builder
     {
         return User::query()
-            ->select('id', 'staff_id', 'full_name', 'username', 'phone', 'image', 'department', 'position', 'role_id', 'status')
-            ->with('role:id,name')
+            ->select('id', 'staff_id', 'full_name', 'username', 'phone', 'image', 'role_id', 'status')
+            ->with(['role:id,name', 'staffProfile:user_id,department,position'])
             ->where(function (Builder $query) {
                 $query
                     ->whereNull('status')

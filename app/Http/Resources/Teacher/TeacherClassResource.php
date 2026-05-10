@@ -10,25 +10,20 @@ class TeacherClassResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id' => $this->id,
-            'code' => $this->code,
-            'academic_year' => $this->academic_year,
-            'year_level' => $this->year_level,
-            'semester' => $this->semester,
-            'section' => $this->section,
-            'max_students' => $this->max_students,
-            'is_active' => $this->is_active,
+            'id'            => $this->id,
+            'name'          => $this->name,
+            'is_active'     => $this->is_active,
             'student_count' => $this->students_count ?? null,
-            'major' => $this->major ? [
-                'id' => $this->major->id,
-                'name_en' => $this->major->name_eg,
-                'name_kh' => $this->major->name_kh,
-            ] : null,
-            'shift' => $this->shift ? [
-                'id' => $this->shift->id,
-                'name' => $this->shift->name,
-                'time_range' => $this->shift->time_range,
-            ] : null,
+            'programs'      => $this->whenLoaded('programs', fn() => $this->programs->map(fn($p) => [
+                'major_id'      => $p->major_id,
+                'major_name'    => $p->major?->name,
+                'shift_id'      => $p->shift_id,
+                'shift_name'    => $p->shift?->name,
+                'year_level'    => $p->year_level,
+                'semester'      => $p->semester,
+                'academic_year' => $p->academic_year,
+                'section'       => $p->section,
+            ])->values()),
         ];
     }
 }

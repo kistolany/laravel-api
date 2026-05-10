@@ -32,6 +32,8 @@ class Teacher extends Authenticatable
         'phone_number',
         'telegram',
         'image',
+        'cv_file',
+        'id_card_file',
         'address',
         'position',
         'degree',
@@ -48,15 +50,10 @@ class Teacher extends Authenticatable
         'status',
         'deleted_by',
         'delete_reason',
-        'otp_code',
-        'otp_expires_at',
-        'is_verified',
-        'verified_at',
     ];
 
     protected $hidden = [
         'password',
-        'otp_code',
     ];
 
     protected function casts(): array
@@ -68,9 +65,6 @@ class Teacher extends Authenticatable
             'salary'        => 'decimal:2',
             'dob'           => 'date',
             'join_date'     => 'date',
-            'is_verified'   => 'boolean',
-            'otp_expires_at'=> 'datetime',
-            'verified_at'   => 'datetime',
             'deleted_at'    => 'datetime',
         ];
     }
@@ -88,11 +82,6 @@ class Teacher extends Authenticatable
     public function attendanceSessions(): HasMany
     {
         return $this->hasMany(AttendanceSession::class, 'teacher_id');
-    }
-
-    public function refreshTokens(): HasMany
-    {
-        return $this->hasMany(TeacherRefreshToken::class, 'teacher_id');
     }
 
     public function getFullNameAttribute(): string

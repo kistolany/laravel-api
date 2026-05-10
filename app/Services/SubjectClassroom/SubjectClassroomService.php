@@ -189,13 +189,14 @@ class SubjectClassroomService
         }
 
         $classroom = $assignment->classroom;
+        $program = $classroom?->programs?->first();
         $context = [
             'student_id' => $submission->student_id,
             'class_id' => $assignment->class_id,
             'subject_id' => $assignment->subject_id,
-            'academic_year' => $classroom?->academic_year,
-            'year_level' => $classroom?->year_level !== null ? (string) $classroom->year_level : null,
-            'semester' => $classroom?->semester !== null ? (string) $classroom->semester : null,
+            'academic_year' => $program?->academic_year,
+            'year_level' => $program?->year_level !== null ? (string) $program->year_level : null,
+            'semester' => $program?->semester !== null ? (string) $program->semester : null,
         ];
 
         $scoreRecord = StudentScore::query()->where($context)->first();
@@ -308,9 +309,6 @@ class SubjectClassroomService
         }
 
         $schedules = $query
-            ->orderBy('class_schedules.academic_year')
-            ->orderBy('class_schedules.year_level')
-            ->orderBy('class_schedules.semester')
             ->orderBy('class_schedules.class_id')
             ->orderBy('class_schedules.subject_id')
             ->get();
@@ -322,15 +320,8 @@ class SubjectClassroomService
                 $class = $schedule->classroom;
 
                 return [
-                    'id' => $schedule->class_id,
+                    'id'   => $schedule->class_id,
                     'name' => $class?->name ?? "Class {$schedule->class_id}",
-                    'major_id' => $class?->major_id,
-                    'major_name' => $class?->major?->name,
-                    'shift_id' => $class?->shift_id ?? $schedule->shift_id,
-                    'shift_name' => $class?->shift?->name ?? $schedule->shift?->name,
-                    'academic_year' => $class?->academic_year ?? $schedule->academic_year,
-                    'year_level' => $class?->year_level ?? $schedule->year_level,
-                    'semester' => $class?->semester ?? $schedule->semester,
                     'subjects' => $items
                         ->unique('subject_id')
                         ->map(fn (ClassSchedule $item) => $this->scheduleSubjectOption($item))
@@ -382,9 +373,9 @@ class SubjectClassroomService
         $query = SubjectLesson::with([
             'teacher:id,first_name,last_name',
             'subject:id,name',
-            'classroom:id,name,major_id,shift_id,academic_year,year_level,semester',
-            'classroom.major:id,name',
-            'classroom.shift:id,name',
+            'classroom:id,name',
+            'classroom.programs.major:id,name',
+            'classroom.programs.shift:id,name',
         ]);
 
         $this->applyVisibleContentScope($query, $actor, 'subject_lessons');
@@ -476,9 +467,9 @@ class SubjectClassroomService
         $query = HomeworkAssignment::with([
                 'teacher:id,first_name,last_name',
                 'subject:id,name',
-                'classroom:id,name,major_id,shift_id,academic_year,year_level,semester',
-                'classroom.major:id,name',
-                'classroom.shift:id,name',
+                'classroom:id,name',
+                'classroom.programs.major:id,name',
+                'classroom.programs.shift:id,name',
             ])
             ->withCount('submissions');
 
@@ -886,19 +877,15 @@ class SubjectClassroomService
                 'class_schedules.subject_id',
                 'class_schedules.teacher_id',
                 'class_schedules.shift_id',
+                'class_schedules.room_id',
                 'class_schedules.day_of_week',
-                'class_schedules.academic_year',
-                'class_schedules.year_level',
-                'class_schedules.semester',
-                'class_schedules.room',
             ])
             ->with([
-                'classroom:id,name,major_id,shift_id,academic_year,year_level,semester,section',
-                'classroom.major:id,name',
-                'classroom.shift:id,name',
+                'classroom:id,name',
                 'subject:id,name,subject_Code',
                 'teacher:id,first_name,last_name',
                 'shift:id,name',
+                'roomModel:id,name',
             ]);
     }
 
@@ -914,15 +901,11 @@ class SubjectClassroomService
             'subject_name' => $schedule->subject?->name,
             'teacher_id' => $schedule->teacher_id,
             'teacher_name' => $schedule->teacher ? trim($schedule->teacher->first_name . ' ' . $schedule->teacher->last_name) : null,
-            'major_id' => $class?->major_id,
-            'major_name' => $class?->major?->name,
-            'shift_id' => $class?->shift_id ?? $schedule->shift_id,
-            'shift_name' => $class?->shift?->name ?? $schedule->shift?->name,
-            'academic_year' => $class?->academic_year ?? $schedule->academic_year,
-            'year_level' => $class?->year_level ?? $schedule->year_level,
-            'semester' => $class?->semester ?? $schedule->semester,
-            'day_of_week' => $schedule->day_of_week,
-            'room' => $schedule->room,
+            'shift_id'   => $schedule->shift_id,
+            'shift_name' => $schedule->shift?->name,
+            'day_of_week'=> $schedule->day_of_week,
+            'room_id'    => $schedule->room_id,
+            'room_name'  => $schedule->roomModel?->name,
         ];
     }
 
@@ -934,14 +917,9 @@ class SubjectClassroomService
             'id' => $schedule->subject_id,
             'name' => $schedule->subject?->name,
             'subject_code' => $schedule->subject?->subject_Code,
-            'class_id' => $schedule->class_id,
+            'class_id'    => $schedule->class_id,
             'schedule_id' => $schedule->id,
-            'teacher_id' => $schedule->teacher_id,
-            'major_id' => $class?->major_id,
-            'major_name' => $class?->major?->name,
-            'academic_year' => $class?->academic_year ?? $schedule->academic_year,
-            'year_level' => $class?->year_level ?? $schedule->year_level,
-            'semester' => $class?->semester ?? $schedule->semester,
+            'teacher_id'  => $schedule->teacher_id,
         ];
     }
 

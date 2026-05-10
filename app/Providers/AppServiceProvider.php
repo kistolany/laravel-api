@@ -31,7 +31,6 @@ class AppServiceProvider extends ServiceProvider
         // Ensure middleware aliases are registered even if cached or in IDE tooling.
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('auth.jwt', \App\Http\Middleware\JwtMiddleware::class);
-        $router->aliasMiddleware('auth.teacher', \App\Http\Middleware\TeacherJwtMiddleware::class);
         $router->aliasMiddleware('role', \App\Http\Middleware\RoleMiddleware::class);
         $router->aliasMiddleware('permission', \App\Http\Middleware\PermissionMiddleware::class);
 

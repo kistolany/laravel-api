@@ -45,17 +45,17 @@ class TeacherResource extends JsonResource
             'experience'     => $this->experience,
             'join_date'      => optional($this->join_date)->toDateString(),
             'note'           => $this->note,
-            // photo
+            // photo & documents
             'image'          => $this->image,
             'image_url'      => $this->image ?: null,
+            'cv_file'        => $this->cv_file ?: null,
+            'id_card_file'   => $this->id_card_file ?: null,
             // auth
             'role'           => $this->role,
             'status'         => $this->status ?: 'active',
             'deleted_at'     => optional($this->deleted_at)->toDateTimeString(),
             'deleted_by'     => $this->deleted_by,
             'delete_reason'  => $this->delete_reason,
-            'is_verified'    => (bool) $this->is_verified,
-            'verified_at'    => optional($this->verified_at)->toDateTimeString(),
             // relations
             'major'   => $this->major ? [
                 'id'   => $this->major->id,

@@ -2,41 +2,30 @@
 
 namespace App\Services\Teacher;
 
-use App\Services\Auth\JwtService;
-
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Mail\TeacherOtpMail;
 use App\Models\Teacher;
-use App\Models\TeacherRefreshToken;
 use App\Models\User;
 use App\Models\Role;
-use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use App\Services\Concerns\ServiceTraceable;
 class TeacherAuthService
 {
     use ServiceTraceable;
 
-    public function __construct(private JwtService $jwt)
-    {
-                            
-                    
-    }
-
     public function register(array $data): Teacher
     {
         return $this->trace(__FUNCTION__, function () use ($data): Teacher {
             return DB::transaction(function () use ($data): Teacher {
-                $imagePath = $this->storeImage($data['image'] ?? null);
+                $imagePath      = $this->storeImage($data['image'] ?? null);
+                $cvFilePath     = $this->storeFile($data['cv_file']      ?? null, 'teacher_cv');
+                $idCardFilePath = $this->storeFile($data['id_card_file'] ?? null, 'teacher_id_cards');
                 $createLogin = !empty($data['username']) && !empty($data['password']);
                 $internalUsername = $createLogin
                     ? $data['username']
@@ -51,7 +40,7 @@ class TeacherAuthService
                     'last_name'       => $data['last_name'],
                     'gender'          => $data['gender'],
                     'major_id'        => (int) $data['major_id'],
-                    'subject_id'      => (int) $data['subject_id'],
+                    'subject_id'      => isset($data['subject_id']) ? (int) $data['subject_id'] : null,
                     'email'           => strtolower($data['email']),
                     'username'        => $internalUsername,
                     'password'        => $createLogin ? Hash::make($data['password']) : Hash::make(Str::random(48)),
@@ -65,6 +54,8 @@ class TeacherAuthService
                     'phone_number'    => $data['phone_number']    ?? null,
                     'telegram'        => $data['telegram']        ?? null,
                     'image'           => $imagePath,
+                    'cv_file'         => $cvFilePath,
+                    'id_card_file'    => $idCardFilePath,
                     // emergency
                     'emergency_name'  => $data['emergency_name']  ?? null,
                     'emergency_phone' => $data['emergency_phone'] ?? null,
@@ -81,10 +72,6 @@ class TeacherAuthService
                     // auth
                     'role'            => 'Teacher',
                     'status'          => $status,
-                    'otp_code'        => null,
-                    'otp_expires_at'  => null,
-                    'is_verified'     => true,
-                    'verified_at'     => now(),
                 ]);
 
                 if ($createLogin) {
@@ -179,6 +166,19 @@ class TeacherAuthService
                 $data['image'] = $this->uploadImage($data['image']);
             }
 
+            // Handle CV and ID card uploads
+            if (isset($data['cv_file']) && $data['cv_file'] instanceof UploadedFile) {
+                $data['cv_file'] = $this->uploadFile($data['cv_file'], 'teacher_cv');
+            } elseif (array_key_exists('cv_file', $data) && !$data['cv_file'] instanceof UploadedFile) {
+                unset($data['cv_file']);
+            }
+
+            if (isset($data['id_card_file']) && $data['id_card_file'] instanceof UploadedFile) {
+                $data['id_card_file'] = $this->uploadFile($data['id_card_file'], 'teacher_id_cards');
+            } elseif (array_key_exists('id_card_file', $data) && !$data['id_card_file'] instanceof UploadedFile) {
+                unset($data['id_card_file']);
+            }
+
             // Hash password if provided
             if (!empty($data['password'])) {
                 $data['password'] = Hash::make($data['password']);
@@ -267,261 +267,6 @@ class TeacherAuthService
         });
     }
 
-    public function verifyOtp(string $email, string $otpCode): Teacher
-    {
-        return $this->trace(__FUNCTION__, function () use ($email, $otpCode): Teacher {
-            $teacher = $this->findTeacherByEmail($email);
-            
-            if ($teacher->is_verified) {
-                return $teacher->load(['major', 'subject']);
-            }
-            
-            if ($teacher->otp_code !== $otpCode) {
-                Log::warning('Teacher OTP verification failed: invalid code.', [
-                    'email' => strtolower($email),
-                ]);
-                throw new ApiException(ResponseStatus::BAD_REQUEST, 'Invalid OTP code.');
-            }
-            
-            if (!$teacher->otp_expires_at || $teacher->otp_expires_at->isPast()) {
-                Log::warning('Teacher OTP verification failed: code expired.', [
-                    'email' => strtolower($email),
-                ]);
-                throw new ApiException(ResponseStatus::BAD_REQUEST, 'OTP code has expired.');
-            }
-            
-            $teacher->update([
-                'is_verified' => true,
-                'verified_at' => now(),
-                'otp_code' => null,
-                'otp_expires_at' => null,
-            ]);
-            
-            return $teacher->refresh()->load(['major', 'subject']);
-            
-            
-        });
-    }
-
-    public function resendOtp(string $email): Teacher
-    {
-        return $this->trace(__FUNCTION__, function () use ($email): Teacher {
-            $teacher = $this->findTeacherByEmail($email);
-            
-            if ($teacher->is_verified) {
-                Log::warning('Teacher resend OTP rejected: account already verified.', [
-                    'email' => strtolower($email),
-                ]);
-                throw new ApiException(ResponseStatus::BAD_REQUEST, 'Teacher account is already verified.');
-            }
-            
-            $otpCode = $this->generateOtpCode();
-            
-            $teacher->update([
-                'otp_code' => $otpCode,
-                'otp_expires_at' => now()->addSeconds($this->otpTtl()),
-            ]);
-            
-            $this->sendOtp($teacher, $otpCode);
-            
-            return $teacher->refresh()->load(['major', 'subject']);
-            
-            
-        });
-    }
-
-    public function login(string $login, string $password, string $ip, ?string $userAgent): array
-    {
-        return $this->trace(__FUNCTION__, function () use ($login, $password, $ip, $userAgent): array {
-            $teacher = Teacher::query()
-                ->where('email', strtolower($login))
-                ->orWhere('username', $login)
-                ->first();
-            
-            if (!$teacher || !Hash::check($password, (string) $teacher->password)) {
-                Log::warning('Teacher login failed: account not found or password invalid.', [
-                    'login' => $login,
-                    'ip' => $ip,
-                ]);
-                throw new AuthenticationException('account not exist');
-            }
-            
-            return $this->issueTokens($teacher, $ip, $userAgent);
-            
-            
-        });
-    }
-
-    public function refresh(string $refreshToken, string $ip, ?string $userAgent): array
-    {
-        return $this->trace(__FUNCTION__, function () use ($refreshToken, $ip, $userAgent): array {
-            $token = $this->getRefreshTokenRecord($refreshToken);
-            
-            if (!$token || $token->isExpired() || $token->isRevoked()) {
-                Log::warning('Teacher refresh failed: invalid refresh token.', [
-                    'ip' => $ip,
-                ]);
-                throw new AuthenticationException('Invalid refresh token.');
-            }
-            
-            $teacher = $token->teacher;
-            
-            if (!$teacher) {
-                Log::warning('Teacher refresh failed: teacher not found.', [
-                    'ip' => $ip,
-                ]);
-                throw new AuthorizationException('Teacher account not found.');
-            }
-            
-            return DB::transaction(function () use ($token, $teacher, $ip, $userAgent) {
-                $token->update([
-                    'revoked_at' => now(),
-                    'last_used_at' => now(),
-                ]);
-            
-                return $this->issueTokens($teacher, $ip, $userAgent);
-            });
-            
-            
-        });
-    }
-
-    public function logout(Teacher $teacher, ?string $refreshToken): void
-    {
-        $this->trace(__FUNCTION__, function () use ($teacher, $refreshToken) {
-            if ($refreshToken) {
-                $this->revokeRefreshToken($teacher, $refreshToken);
-            }
-            
-            
-        });
-    }
-
-    public function logoutAll(Teacher $teacher): int
-    {
-        return $this->trace(__FUNCTION__, function () use ($teacher): int {
-            return TeacherRefreshToken::where('teacher_id', $teacher->id)
-                ->whereNull('revoked_at')
-                ->update([
-                    'revoked_at' => now(),
-                    'last_used_at' => now(),
-                ]);
-            
-            
-        });
-    }
-
-    public function revokeRefreshToken(Teacher $teacher, string $refreshToken): bool
-    {
-        return $this->trace(__FUNCTION__, function () use ($teacher, $refreshToken): bool {
-            $token = $this->getRefreshTokenRecord($refreshToken, $teacher->id);
-            
-            if (!$token || $token->isRevoked()) {
-                return false;
-            }
-            
-            $token->update([
-                'revoked_at' => now(),
-                'last_used_at' => now(),
-            ]);
-            
-            return true;
-            
-            
-        });
-    }
-
-    public function revokeRefreshTokenOrFail(Teacher $teacher, string $refreshToken): void
-    {
-        $this->trace(__FUNCTION__, function () use ($teacher, $refreshToken) {
-            $revoked = $this->revokeRefreshToken($teacher, $refreshToken);
-            
-            if (!$revoked) {
-                Log::warning('Teacher revoke refresh token failed: token not found.', [
-                    'teacher_id' => $teacher->id,
-                ]);
-                throw new ApiException(ResponseStatus::NOT_FOUND, 'Refresh token not found.');
-            }
-            
-            
-        });
-    }
-
-    private function issueTokens(Teacher $teacher, string $ip, ?string $userAgent): array
-    {
-        return DB::transaction(function () use ($teacher, $ip, $userAgent) {
-            TeacherRefreshToken::where('teacher_id', $teacher->id)
-                ->whereNull('revoked_at')
-                ->update([
-                    'revoked_at' => now(),
-                    'last_used_at' => now(),
-                ]);
-
-            $access = $this->jwt->issueAccessToken($teacher, 'teacher');
-            $refreshPlain = bin2hex(random_bytes(64));
-
-            TeacherRefreshToken::create([
-                'teacher_id' => $teacher->id,
-                'token_hash' => hash('sha256', $refreshPlain),
-                'expires_at' => now()->addSeconds((int) config('jwt.refresh_ttl', 604800)),
-                'last_used_at' => now(),
-                'ip_address' => $ip,
-                'user_agent' => $userAgent,
-            ]);
-
-            return [
-                'access_token' => $access['token'],
-                'refresh_token' => $refreshPlain,
-                'token_type' => 'Bearer',
-                'expires_in' => $access['expires_in'],
-                'teacher' => $teacher->load(['major', 'subject']),
-            ];
-        });
-    }
-
-    private function getRefreshTokenRecord(string $refreshToken, ?int $teacherId = null): ?TeacherRefreshToken
-    {
-        $hash = hash('sha256', $refreshToken);
-        $query = TeacherRefreshToken::where('token_hash', $hash)->with('teacher');
-
-        if ($teacherId !== null) {
-            $query->where('teacher_id', $teacherId);
-        }
-
-        return $query->first();
-    }
-
-    private function findTeacherByEmail(string $email): Teacher
-    {
-        $teacher = Teacher::where('email', strtolower($email))->first();
-
-        if (!$teacher) {
-            Log::warning('Teacher lookup by email failed: not found.', [
-                'email' => strtolower($email),
-            ]);
-            throw new ApiException(ResponseStatus::NOT_FOUND, 'Teacher not found.');
-        }
-
-        return $teacher;
-    }
-
-    private function sendOtp(Teacher $teacher, string $otpCode): void
-    {
-        $minutes = (int) ceil($this->otpTtl() / 60);
-
-        Mail::to($teacher->email)->send(new TeacherOtpMail($teacher, $otpCode, $minutes));
-    }
-
-    private function generateOtpCode(): string
-    {
-        return (string) random_int(100000, 999999);
-    }
-
-    private function otpTtl(): int
-    {
-        return max((int) config('teacher_auth.otp_ttl', 600), 300);
-    }
-
     public function uploadImage(UploadedFile $file): string
     {
         return $this->trace(__FUNCTION__, function () use ($file): string {
@@ -572,6 +317,41 @@ class TeacherAuthService
         return $this->uploadImage($image);
     }
 
+    public function uploadFile(UploadedFile $file, string $folder = 'teacher_files'): string
+    {
+        return $this->trace(__FUNCTION__, function () use ($file, $folder): string {
+            $this->ensureCloudinaryConfigured();
+            $uploadOptions = array_merge(
+                $this->buildCloudinaryUploadOptions($folder),
+                ['resource_type' => 'auto']
+            );
+
+            try {
+                $result = \CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary::uploadApi()->upload(
+                    $file->getRealPath(),
+                    $uploadOptions
+                );
+                $url = $result['secure_url'] ?? null;
+            } catch (\Throwable $e) {
+                Log::error('Teacher file upload failed on Cloudinary.', ['error' => $e->getMessage()]);
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload file.');
+            }
+
+            if (!$url) {
+                throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload file.');
+            }
+
+            return $url;
+        });
+    }
+
+    private function storeFile(mixed $file, string $folder): ?string
+    {
+        if (is_string($file)) return $file;
+        if (!$file instanceof UploadedFile) return null;
+        return $this->uploadFile($file, $folder);
+    }
+
     private function ensureCloudinaryConfigured(): void
     {
         $cloudUrl = (string) config('cloudinary.cloud_url', '');
@@ -591,6 +371,7 @@ class TeacherAuthService
             'unique_filename' => false,
             'use_filename_as_display_name' => true,
             'resource_type' => 'auto',
+            'access_mode' => 'public',
         ];
         
         $preset = trim((string) config('cloudinary.upload_preset', ''));
@@ -678,6 +459,4 @@ class TeacherAuthService
         return $context;
     }
 }
-
-
 

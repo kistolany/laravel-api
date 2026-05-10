@@ -39,7 +39,7 @@ class AttendanceSessionService
                 ->map(fn (AttendanceSession $s) => [
                     'id'             => $s->id,
                     'class_id'       => $s->class_id,
-                    'class_name'     => $s->classroom?->name ?? $s->classroom?->code ?? '—',
+                    'class_name'     => $s->classroom?->name ?? '—',
                     'subject_id'     => $s->subject_id,
                     'subject_name'   => $s->subject?->name_eg ?? $s->subject?->name_kh ?? '—',
                     'session_date'   => $this->formatDate($s->session_date),
@@ -104,7 +104,7 @@ class AttendanceSessionService
                 ->map(fn (AttendanceSession $s) => [
                     'id'             => $s->id,
                     'class_id'       => $s->class_id,
-                    'class_name'     => $s->classroom?->name ?? $s->classroom?->code ?? '—',
+                    'class_name'     => $s->classroom?->name ?? '—',
                     'subject_id'     => $s->subject_id,
                     'subject_name'   => $s->subject?->name_eg ?? $s->subject?->name_kh ?? '—',
                     'session_date'   => $this->formatDate($s->session_date),
@@ -266,14 +266,13 @@ class AttendanceSessionService
                         'id' => $session->id,
                         'session_date' => $this->formatDate($session->session_date),
                         'session_number' => (int) $session->session_number,
-                        'academic_year' => $session->academic_year ?? $classroom->academic_year,
-                        'year_level' => $session->year_level ?? $classroom->year_level,
-                        'semester' => $session->semester ?? $classroom->semester,
+                        'academic_year' => $session->academic_year,
+                        'year_level'    => $session->year_level,
+                        'semester'      => $session->semester,
                     ],
                     'class' => [
-                        'id' => $classroom->id,
-                        'code' => $classroom->code,
-                        'section' => $classroom->section,
+                        'id'   => $classroom->id,
+                        'name' => $classroom->name,
                     ],
                     'major' => [
                         'id' => $major?->id,
@@ -605,19 +604,16 @@ class AttendanceSessionService
                 return $this->errorResponse(404, 'Class not found.');
             }
             
-            if ((int) $class->major_id !== (int) $teacher->major_id) {
-                return $this->errorResponse(403, 'Forbidden.');
-            }
-            
             if ((int) $data['subject_id'] !== (int) $teacher->subject_id) {
                 return $this->errorResponse(403, 'Forbidden.');
             }
-            
-            $subjectAllowed = MajorSubject::query()
-                ->where('major_id', $class->major_id)
+
+            $program = $class->programs()->first();
+            $subjectAllowed = $program && MajorSubject::query()
+                ->where('major_id', $program->major_id)
                 ->where('subject_id', $teacher->subject_id)
-                ->where('year_level', $class->year_level)
-                ->where('semester', $class->semester)
+                ->where('year_level', $program->year_level)
+                ->where('semester', $program->semester)
                 ->exists();
             
             if (!$subjectAllowed) {
@@ -779,11 +775,11 @@ class AttendanceSessionService
             'subject_id' => $subjectId,
             'session_date' => $sessionDate,
             'session_number' => $sessionNumber,
-            'major_id' => $class->major_id,
-            'shift_id' => $class->shift_id,
-            'academic_year' => $class->academic_year,
-            'year_level' => $class->year_level,
-            'semester' => $class->semester,
+            'major_id' => null,
+            'shift_id' => null,
+            'academic_year' => null,
+            'year_level' => null,
+            'semester' => null,
         ]);
 
         $dto = new AttendanceSessionCreateData(
@@ -917,7 +913,7 @@ class AttendanceSessionService
     private function detailQuery()
     {
         return AttendanceSession::with([
-            'classroom.major',
+            'classroom.programs.major',
             'classroom.shift',
             'major',
             'subject',
@@ -1025,7 +1021,7 @@ class AttendanceSessionService
             'session_count' => $sessionCount,
             'class' => [
                 'id' => $class->id,
-                'name' => $class->name ?? $class->code,
+                'name' => $class->name,
                 'academic_year' => $context['academic_year'],
                 'year_level' => $context['year_level'],
                 'semester' => $context['semester'],
@@ -1268,14 +1264,6 @@ class AttendanceSessionService
             ->filter(fn (array $context) => $context['major_id'])
             ->values();
 
-        if ($class->major_id) {
-            $contexts->push([
-                'major_id' => $class->major_id,
-                'year_level' => $class->year_level,
-                'semester' => $class->semester,
-            ]);
-        }
-
         return array_values(array_filter(array_map(
             fn (array $context) => $this->mergeRequestedSubjectContext($context, $filters),
             $contexts
@@ -1327,7 +1315,7 @@ class AttendanceSessionService
         $yearLevel = $this->toNullableYearLevel($filters['year_level'] ?? $filters['stage'] ?? null);
         $semester = $this->toNullableInt($filters['semester'] ?? null);
         $schedule = $this->resolveScheduleForMatrix($class, $filters);
-        $academicYear = $this->toNullableString($filters['academic_year'] ?? null) ?? $schedule?->academic_year ?? $class->academic_year;
+        $academicYear = $this->toNullableString($filters['academic_year'] ?? null);
 
         $program = $class->programs->first(function ($program) use ($majorId, $shiftId, $yearLevel, $semester) {
             if ($majorId && (int) ($program->major_id ?? 0) !== $majorId) {
@@ -1349,10 +1337,10 @@ class AttendanceSessionService
             return true;
         });
 
-        $resolvedMajorId = $majorId ?: ($program?->major_id ?: $class->major_id);
-        $resolvedShiftId = $shiftId ?: ($schedule?->shift_id ?: ($program?->shift_id ?: $class->shift_id));
-        $resolvedYearLevel = $yearLevel ?: ($schedule?->year_level ?: ($program?->year_level ?: $class->year_level));
-        $resolvedSemester = $semester ?: ($schedule?->semester ?: ($program?->semester ?: $class->semester));
+        $resolvedMajorId = $majorId ?: $program?->major_id;
+        $resolvedShiftId = $shiftId ?: ($schedule?->shift_id ?: $program?->shift_id);
+        $resolvedYearLevel = $yearLevel ?: $program?->year_level;
+        $resolvedSemester = $semester ?: $program?->semester;
 
         return [
             'major_id' => $resolvedMajorId,

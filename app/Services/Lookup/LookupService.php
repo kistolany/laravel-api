@@ -5,6 +5,7 @@ namespace App\Services\Lookup;
 use App\Services\BaseService;
 
 use App\Models\AcademicInfo;
+use App\Models\AcademicTerm;
 use App\Models\Classes;
 use App\Models\ClassProgram;
 use App\Models\ClassSchedule;
@@ -18,6 +19,7 @@ use App\Models\Shift;
 use App\Models\StudentScore;
 use App\Models\Subject;
 use App\Models\Teacher;
+use App\Models\YearLevel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 class LookupService extends BaseService
@@ -45,7 +47,7 @@ class LookupService extends BaseService
             $facultyId = $this->toNullableInt($facultyId);
             return $this->rememberLookup($fn, ['faculty_id' => $facultyId], fn () => Major::query()
                 ->when(!is_null($facultyId), fn ($query) => $query->where('faculty_id', $facultyId))
-                ->select('id', 'name')
+                ->select('id', 'faculty_id', 'name')
                 ->orderBy('name')
                 ->get());
         });
@@ -131,50 +133,115 @@ class LookupService extends BaseService
         });
     }
 
-    public function getClasses(mixed $majorId = null, mixed $shiftId = null, mixed $yearLevel = null, mixed $semester = null)
+    public function getClasses(mixed $majorId = null, mixed $shiftId = null, mixed $yearLevel = null, mixed $semester = null, mixed $academicYear = null)
     {
         $fn = __FUNCTION__;
-        return $this->trace($fn, function () use ($fn, $majorId, $shiftId, $yearLevel, $semester) {
+        return $this->trace($fn, function () use ($fn, $majorId, $shiftId, $yearLevel, $semester, $academicYear) {
             // All four params must be integers to match the DB column types (unsignedTinyInteger / unsignedBigInteger)
             $majorId   = $this->toNullableInt($majorId);
             $shiftId   = $this->toNullableInt($shiftId);
             $yearLevel = $this->toNullableInt($yearLevel);
             $semester  = $this->toNullableInt($semester);
+            $academicYear = filled($academicYear) ? (string) $academicYear : null;
 
             return $this->rememberLookup($fn, [
-                'major_id'   => $majorId,
-                'shift_id'   => $shiftId,
-                'year_level' => $yearLevel,
-                'semester'   => $semester,
+                'major_id'      => $majorId,
+                'shift_id'      => $shiftId,
+                'year_level'    => $yearLevel,
+                'semester'      => $semester,
+                'academic_year' => $academicYear,
             ], fn () => Classes::query()
                 // A class can serve multiple majors via class_programs — filter through that relationship
-                ->when($majorId || $shiftId || $yearLevel || $semester, function ($q) use ($majorId, $shiftId, $yearLevel, $semester) {
-                    $q->whereHas('programs', function ($pq) use ($majorId, $shiftId, $yearLevel, $semester) {
+                ->when($majorId || $shiftId || $yearLevel || $semester || $academicYear, function ($q) use ($majorId, $shiftId, $yearLevel, $semester, $academicYear) {
+                    $q->whereHas('programs', function ($pq) use ($majorId, $shiftId, $yearLevel, $semester, $academicYear) {
                         $pq->when($majorId,   fn ($q) => $q->where('major_id',   $majorId))
                            ->when($shiftId,   fn ($q) => $q->where('shift_id',   $shiftId))
                            ->when($yearLevel, fn ($q) => $q->where('year_level', $yearLevel))
-                           ->when($semester,  fn ($q) => $q->where('semester',   $semester));
+                           ->when($semester,  fn ($q) => $q->where('semester',   $semester))
+                           ->when($academicYear, fn ($q) => $q->where('academic_year', $academicYear));
                     });
                 })
+                ->with(['programs' => function ($query) use ($majorId, $shiftId, $yearLevel, $semester, $academicYear) {
+                    $query
+                        ->when($majorId,      fn ($q) => $q->where('major_id',      $majorId))
+                        ->when($shiftId,      fn ($q) => $q->where('shift_id',      $shiftId))
+                        ->when($yearLevel,    fn ($q) => $q->where('year_level',    $yearLevel))
+                        ->when($semester,     fn ($q) => $q->where('semester',      $semester))
+                        ->when($academicYear, fn ($q) => $q->where('academic_year', $academicYear))
+                        ->with(['major', 'shift']);
+                }])
                 ->select('id', 'name')
                 ->orderBy('name')
-                ->get());
+                ->get()
+                ->map(function (Classes $class) {
+                    $program = $class->programs->first();
+
+                    return [
+                        'id' => $class->id,
+                        'name' => $class->name,
+                        'class_program_id' => $program?->id,
+                        'major_id' => $program?->major_id,
+                        'major_name' => $program?->major?->name,
+                        'shift_id' => $program?->shift_id,
+                        'shift_name' => $program?->shift?->name,
+                        'academic_year' => $program?->academic_year,
+                        'year_level' => $program?->year_level,
+                        'semester' => $program?->semester,
+                    ];
+                }));
         });
     }
 
     public function getStages(): array
     {
+        return $this->getYearLevels();
+    }
+
+    public function getYearLevels(): array
+    {
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
-            return $this->rememberLookup($fn, [], fn () =>
-                AcademicInfo::select('stage')
+            return $this->rememberLookup($fn, [], function (): array {
+                if (Schema::hasTable('year_levels')) {
+                    $items = YearLevel::query()
+                        ->where('is_active', true)
+                        ->ordered()
+                        ->get()
+                        ->map(fn (YearLevel $level) => [
+                            'id' => $level->id,
+                            'value' => $level->number ?? $level->id,
+                            'label' => $level->name,
+                            'name' => $level->name,
+                            'code' => $level->code,
+                            'number' => $level->number,
+                            'sort_order' => $level->sort_order,
+                        ])
+                        ->toArray();
+
+                    if (!empty($items)) {
+                        return $items;
+                    }
+                }
+
+                $values = AcademicInfo::select('stage')
                     ->distinct()
                     ->whereNotNull('stage')
                     ->orderBy('stage')
                     ->pluck('stage')
-                    ->map(fn ($v) => ['value' => $v, 'label' => $v])
-                    ->toArray()
-            );
+                    ->map(fn ($value) => [
+                        'value' => $this->toNullableInt($value) ?? $value,
+                        'label' => (string) $value,
+                    ])
+                    ->toArray();
+
+                if (!empty($values)) {
+                    return $values;
+                }
+
+                return collect(range(1, 6))
+                    ->map(fn (int $value) => ['value' => $value, 'label' => 'Year ' . $value])
+                    ->toArray();
+            });
         });
     }
 
@@ -222,9 +289,35 @@ class LookupService extends BaseService
 
     public function getSemesters(): array
     {
+        return $this->getAcademicTerms();
+    }
+
+    public function getAcademicTerms(): array
+    {
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
             return $this->rememberLookup($fn, [], function (): array {
+                if (Schema::hasTable('academic_terms')) {
+                    $items = AcademicTerm::query()
+                        ->where('is_active', true)
+                        ->ordered()
+                        ->get()
+                        ->map(fn (AcademicTerm $term) => [
+                            'id' => $term->id,
+                            'value' => $term->number ?? $term->id,
+                            'label' => $term->name,
+                            'name' => $term->name,
+                            'code' => $term->code,
+                            'number' => $term->number,
+                            'sort_order' => $term->sort_order,
+                        ])
+                        ->toArray();
+
+                    if (!empty($items)) {
+                        return $items;
+                    }
+                }
+
                 $values = collect();
 
                 if (Schema::hasColumn((new Classes())->getTable(), 'semester')) {
@@ -251,7 +344,7 @@ class LookupService extends BaseService
                 }
 
                 return $values
-                    ->map(fn ($value) => ['value' => $value, 'label' => $value])
+                    ->map(fn ($value) => ['value' => (int) $value, 'label' => 'Semester ' . $value])
                     ->toArray();
             });
         });
@@ -312,14 +405,12 @@ class LookupService extends BaseService
                     ])
                     ->all(),
                 'classes' => Classes::query()
-                    ->select('id', 'name', 'major_id', 'shift_id')
+                    ->select('id', 'name')
                     ->orderBy('name')
                     ->get()
                     ->map(fn (Classes $class) => [
                         'id' => $class->id,
                         'name' => $class->name,
-                        'major_id' => $class->major_id,
-                        'shift_id' => $class->shift_id,
                     ])
                     ->all(),
             ]);
@@ -558,14 +649,6 @@ class LookupService extends BaseService
 
     private function applyAttendanceClassContextFilters($query, array $filters): void
     {
-        $hasDirectFilters = (bool) (
-            $filters['faculty_id']
-            || $filters['major_id']
-            || $filters['shift_id']
-            || $filters['year_level']
-            || $filters['semester']
-            || $filters['academic_year']
-        );
         $hasProgramFilters = (bool) (
             $filters['faculty_id']
             || $filters['major_id']
@@ -576,28 +659,8 @@ class LookupService extends BaseService
         $scheduleDay = $this->toScheduleDay($filters['study_day']);
         $hasScheduleFilters = (bool) (
             $filters['shift_id']
-            || $filters['year_level']
-            || $filters['semester']
-            || $filters['academic_year']
             || $scheduleDay
         );
-
-        if ($hasDirectFilters) {
-            $query->where(function ($direct) use ($filters) {
-                $direct
-                    ->when($filters['major_id'], fn ($q, $value) => $q->where('classes.major_id', $value))
-                    ->when($filters['shift_id'], fn ($q, $value) => $q->where('classes.shift_id', $value))
-                    ->when($filters['year_level'], fn ($q, $value) => $q->where('classes.year_level', $value))
-                    ->when($filters['semester'], fn ($q, $value) => $q->where('classes.semester', $value))
-                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('classes.academic_year', $value));
-
-                if ($filters['faculty_id'] && !$filters['major_id']) {
-                    $direct->whereIn('classes.major_id', Major::query()
-                        ->select('id')
-                        ->where('faculty_id', $filters['faculty_id']));
-                }
-            });
-        }
 
         if ($hasProgramFilters) {
             $programClause = function ($program) use ($filters) {
@@ -616,11 +679,7 @@ class LookupService extends BaseService
                 }
             };
 
-            if ($hasDirectFilters) {
-                $query->orWhereExists($programClause);
-            } else {
-                $query->whereExists($programClause);
-            }
+            $query->whereExists($programClause);
         }
 
         if ($hasScheduleFilters) {
@@ -630,13 +689,10 @@ class LookupService extends BaseService
                     ->from('class_schedules')
                     ->whereColumn('class_schedules.class_id', 'classes.id')
                     ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_schedules.shift_id', $value))
-                    ->when($filters['academic_year'], fn ($q, $value) => $q->where('class_schedules.academic_year', $value))
-                    ->when($filters['year_level'], fn ($q, $value) => $q->where('class_schedules.year_level', $value))
-                    ->when($filters['semester'], fn ($q, $value) => $q->where('class_schedules.semester', $value))
                     ->when($scheduleDay, fn ($q, $value) => $q->where('class_schedules.day_of_week', $value));
             };
 
-            if ($hasDirectFilters || $hasProgramFilters) {
+            if ($hasProgramFilters) {
                 $query->orWhereExists($scheduleClause);
             } else {
                 $query->whereExists($scheduleClause);
@@ -690,14 +746,6 @@ class LookupService extends BaseService
             ->filter(fn (array $context) => $context['major_id'])
             ->values();
 
-        if ($class->major_id) {
-            $contexts->push([
-                'major_id' => $class->major_id,
-                'year_level' => $class->year_level,
-                'semester' => $class->semester,
-            ]);
-        }
-
         return array_values(array_filter(array_map(
             fn (array $context) => $this->mergeRequestedContext($context, $filters),
             $contexts
@@ -716,10 +764,7 @@ class LookupService extends BaseService
         $query = ClassSchedule::query()
             ->join('subjects', 'subjects.id', '=', 'class_schedules.subject_id')
             ->where('class_schedules.class_id', $filters['class_id'])
-            ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_schedules.shift_id', $value))
-            ->when($filters['academic_year'], fn ($q, $value) => $q->where('class_schedules.academic_year', $value))
-            ->when($filters['year_level'], fn ($q, $value) => $q->where('class_schedules.year_level', $value))
-            ->when($filters['semester'], fn ($q, $value) => $q->where('class_schedules.semester', $value));
+            ->when($filters['shift_id'], fn ($q, $value) => $q->where('class_schedules.shift_id', $value));
 
         $dayOfWeek = $this->toScheduleDay($filters['study_day']);
         if ($dayOfWeek) {

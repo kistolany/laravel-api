@@ -9,6 +9,7 @@ use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
 use App\Http\Resources\Subject\SubjectResource;
 use App\Models\Subject;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 class SubjectService extends BaseService
@@ -54,7 +55,10 @@ class SubjectService extends BaseService
             $validatedData = $this->validateExisting($data);
             
             //create and return
-            return Subject::create($validatedData);
+            $subject = Subject::create($validatedData);
+            $this->forgetSubjectLookupCache();
+
+            return $subject;
             
             
         });
@@ -71,6 +75,8 @@ class SubjectService extends BaseService
             
             // 3. Perform update
             $subject->update($validatedData);
+            $this->forgetSubjectLookupCache();
+
             return $subject;
             
             
@@ -84,7 +90,10 @@ class SubjectService extends BaseService
             $subject = $this->findById($id);
             
             // perform delete
-            return $subject->delete($subject);
+            $deleted = $subject->delete($subject);
+            $this->forgetSubjectLookupCache();
+
+            return $deleted;
             
             
         });
@@ -123,6 +132,20 @@ class SubjectService extends BaseService
         }
 
         return $validator->validated();
+    }
+
+    private function forgetSubjectLookupCache(): void
+    {
+        $params = [
+            'major_id' => null,
+            'semester' => null,
+            'year_level' => null,
+        ];
+        ksort($params);
+
+        $payload = json_encode($params, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        Cache::forget('lookup:getSubjectsByMajor:' . sha1((string) $payload));
     }
 }
 

@@ -66,13 +66,13 @@ class StudentScoreService extends BaseService
                     : (int) filter_var($filters['stage'], FILTER_SANITIZE_NUMBER_INT))
                 : null;
 
-            // When class_id is given but year/semester were not selected, derive them from the class row
+            // When class_id is given but year/semester were not selected, derive them from the class's first program
             if ($filters['class_id'] && (!$gbYearInt || !$filters['semester'])) {
-                $classRow = Classes::find($filters['class_id']);
-                if ($classRow) {
-                    $gbYearInt          = $gbYearInt          ?? ($classRow->year_level ? (int) $classRow->year_level : null);
-                    $filters['stage']   = $filters['stage']   ?? ($classRow->year_level ? (string) $classRow->year_level : null);
-                    $filters['semester']= $filters['semester'] ?? ($classRow->semester   ? (string) $classRow->semester  : null);
+                $program = \App\Models\ClassProgram::where('class_id', $filters['class_id'])->first();
+                if ($program) {
+                    $gbYearInt          = $gbYearInt          ?? ($program->year_level ? (int) $program->year_level : null);
+                    $filters['stage']   = $filters['stage']   ?? ($program->year_level ? (string) $program->year_level : null);
+                    $filters['semester']= $filters['semester'] ?? ($program->semester   ? (string) $program->semester  : null);
                 }
             }
 
@@ -150,7 +150,7 @@ class StudentScoreService extends BaseService
                     'major_id'     => $major?->id,
                     'major_name'   => $major?->name,
                     'class_id'     => $class?->id,
-                    'class_name'   => $class?->name ?? $class?->code,
+                    'class_name'   => $class?->name,
                     'year_level'   => $yearInt ? (string) $yearInt : null,
                     'semester'     => $filters['semester'] ?? null,
                     'scores'       => $scoreMap,
@@ -238,9 +238,9 @@ class StudentScoreService extends BaseService
             $class = Classes::with('programs')->find($filters['class_id']);
             if ($class) {
                 $program  = $this->resolveProgram($class, $filters);
-                $majorId  = $majorId  ?? $program?->major_id  ?? $class->major_id;
-                $yearInt  = $yearInt  ?? ($program ? (int) $program->year_level : null) ?? ($class->year_level ? (int) $class->year_level : null);
-                $semester = $semester ?? ($program ? (string) $program->semester : null) ?? ($class->semester ? (string) $class->semester : null);
+                $majorId  = $majorId  ?? $program?->major_id;
+                $yearInt  = $yearInt  ?? ($program ? (int) $program->year_level : null);
+                $semester = $semester ?? ($program ? (string) $program->semester : null);
             }
         }
 
@@ -414,9 +414,9 @@ class StudentScoreService extends BaseService
                         'student_id' => $studentId,
                         'class_id' => $record['class_id'] ?? null,
                         'subject_id' => $record['subject_id'] ?? null,
-                        'academic_year' => $record['academic_year'] ?? $class?->academic_year,
-                        'year_level' => $record['year_level'] ?? ($class?->year_level ? (string) $class->year_level : null),
-                        'semester' => $record['semester'] ?? ($class?->semester ? (string) $class->semester : null),
+                        'academic_year' => $record['academic_year'] ?? null,
+                        'year_level' => $record['year_level'] ?? null,
+                        'semester' => $record['semester'] ?? null,
                     ];
 
                     $updates = [
@@ -652,10 +652,10 @@ class StudentScoreService extends BaseService
             'shift_id' => $shift?->id,
             'shift_name' => $shift?->name,
             'class_id' => $class?->id,
-            'class_name' => $class?->name ?? $class?->code,
+            'class_name' => $class?->name,
             'subject_id' => $filters['subject_id'] ?? $score?->subject_id,
             'subject_name' => $subject?->name,
-            'academic_year' => $score?->academic_year ?? $class?->academic_year,
+            'academic_year' => $score?->academic_year,
             'year_level' => $yearLevel ? (string) $yearLevel : null,
             'semester' => $semester ? (string) $semester : null,
             'score_id' => $score?->id,
@@ -712,10 +712,10 @@ class StudentScoreService extends BaseService
             'shift_id' => $shift?->id,
             'shift_name' => $shift?->name,
             'class_id' => $class?->id,
-            'class_name' => $class?->name ?? $class?->code,
-            'academic_year' => $firstScore?->academic_year ?? $class?->academic_year,
-            'year_level' => $firstScore?->year_level ?? ($class?->year_level ? (string) $class->year_level : $academic?->stage),
-            'semester' => $firstScore?->semester ?? ($class?->semester ? (string) $class->semester : $filters['semester']),
+            'class_name' => $class?->name,
+            'academic_year' => $firstScore?->academic_year,
+            'year_level' => $firstScore?->year_level ?? $academic?->stage,
+            'semester' => $firstScore?->semester ?? $filters['semester'],
             'attendance_score' => $attendanceScore,
             'subjects' => $subjectRows->all(),
             'score_ids' => $scores->pluck('id')->filter()->values()->all(),

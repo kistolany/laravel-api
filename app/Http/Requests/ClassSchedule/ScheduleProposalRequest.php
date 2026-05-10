@@ -19,9 +19,9 @@ class ScheduleProposalRequest extends FormRequest
             'shift_id' => 'required|integer|exists:shifts,id',
             'day_of_week' => 'required|string|in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
             'room' => 'nullable|string|max:100',
-            'academic_year' => 'required|string|max:20',
-            'year_level' => 'required|integer|min:1|max:6',
-            'semester' => 'required|integer|min:1|max:3',
+            'academic_year' => 'nullable|string|max:20',
+            'year_level' => 'nullable|integer|min:1|max:6',
+            'semester' => 'nullable|integer|min:1|max:3',
             'teacher_id' => 'required|integer|exists:teachers,id',
         ];
     }

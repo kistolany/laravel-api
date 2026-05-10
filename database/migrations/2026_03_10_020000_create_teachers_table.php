@@ -23,14 +23,9 @@ return new class extends Migration
             $table->string('image')->nullable();
             $table->text('address');
             $table->string('role')->default('Teacher');
-            $table->string('otp_code', 6)->nullable();
-            $table->timestamp('otp_expires_at')->nullable();
-            $table->boolean('is_verified')->default(false);
-            $table->timestamp('verified_at')->nullable();
             $table->timestamps();
 
             $table->index(['major_id', 'subject_id']);
-            $table->index(['email', 'is_verified']);
         });
     }
 

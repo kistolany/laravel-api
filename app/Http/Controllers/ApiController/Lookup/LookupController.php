@@ -93,6 +93,7 @@ class LookupController extends Controller
             $request->query('shift_id'),
             $request->query('year_level'),
             $request->query('semester'),
+            $request->query('academic_year'),
         );
 
         return $this->success($data);
@@ -111,6 +112,11 @@ class LookupController extends Controller
         return $this->success($this->service->getStages());
     }
 
+    public function yearLevels()
+    {
+        return $this->success($this->service->getYearLevels());
+    }
+
     public function batchYears()
     {
         return $this->success($this->service->getBatchYears());
@@ -124,6 +130,11 @@ class LookupController extends Controller
     public function semesters()
     {
         return $this->success($this->service->getSemesters());
+    }
+
+    public function academicTerms()
+    {
+        return $this->success($this->service->getAcademicTerms());
     }
 
     public function studyDays()

@@ -32,11 +32,8 @@ class TeacherModuleService extends BaseService
                 });
             });
             
-            $query->when(request('class_id'), function ($q, $classId) use ($teacher) {
-                $q->whereHas('classes', function ($classQuery) use ($classId, $teacher) {
-                    $classQuery->where('classes.id', $classId)
-                        ->where('classes.major_id', $teacher->major_id);
-                });
+            $query->when(request('class_id'), function ($q, $classId) {
+                $q->whereHas('classes', fn ($classQuery) => $classQuery->where('classes.id', $classId));
             });
             
             $query->when(request('shift_id'), function ($q, $shiftId) {
@@ -56,22 +53,29 @@ class TeacherModuleService extends BaseService
     public function classes(Teacher $teacher): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function () use ($teacher): PaginatedResult {
-            $query = Classes::with(['major', 'shift'])
-                ->withCount('students')
-                ->where('major_id', $teacher->major_id);
-            
-            $query->when(request('academic_year'), fn ($q, $year) => $q->where('academic_year', $year));
-            $query->when(request('year_level'), fn ($q, $level) => $q->where('year_level', $level));
-            $query->when(request('semester'), fn ($q, $semester) => $q->where('semester', $semester));
-            $query->when(request('shift_id'), fn ($q, $shiftId) => $q->where('shift_id', $shiftId));
+            $query = Classes::with(['programs.major', 'programs.shift'])
+                ->withCount('students');
+
             $query->when(request('is_active'), fn ($q, $active) => $q->where('is_active', filter_var($active, FILTER_VALIDATE_BOOL)));
-            $query->when(request('search'), function ($q, $search) {
-                $q->where(function ($inner) use ($search) {
-                    $inner->where('code', 'like', "%{$search}%")
-                        ->orWhere('section', 'like', "%{$search}%");
-                });
-            });
-            
+            $query->when(request('search'), fn ($q, $search) => $q->where('name', 'like', "%{$search}%"));
+
+            if ($teacher->major_id) {
+                $query->whereHas('programs', fn ($q) => $q->where('major_id', $teacher->major_id));
+            }
+
+            if ($academicYear = request('academic_year')) {
+                $query->whereHas('programs', fn ($q) => $q->where('academic_year', $academicYear));
+            }
+            if ($yearLevel = request('year_level')) {
+                $query->whereHas('programs', fn ($q) => $q->where('year_level', $yearLevel));
+            }
+            if ($semester = request('semester')) {
+                $query->whereHas('programs', fn ($q) => $q->where('semester', $semester));
+            }
+            if ($shiftId = request('shift_id')) {
+                $query->whereHas('programs', fn ($q) => $q->where('shift_id', $shiftId));
+            }
+
             return $this->paginateResponse($query->latest(), TeacherClassResource::class);
             
             
@@ -92,21 +96,29 @@ class TeacherModuleService extends BaseService
     public function attendanceOptions(Teacher $teacher): array
     {
         return $this->trace(__FUNCTION__, function () use ($teacher): array {
-            $classes = Classes::with(['major', 'shift'])
-                ->where('major_id', $teacher->major_id)
-                ->whereExists(function ($query) use ($teacher) {
-                    $query->selectRaw('1')
-                        ->from((new MajorSubject())->getTable())
-                        ->whereColumn('major_subjects.major_id', 'classes.major_id')
-                        ->where('major_subjects.subject_id', $teacher->subject_id)
-                        ->whereColumn('major_subjects.year_level', 'classes.year_level')
-                        ->whereColumn('major_subjects.semester', 'classes.semester');
-                })
-                ->orderBy('year_level')
-                ->orderBy('semester')
-                ->orderBy('code')
-                ->get();
-            
+            $classQuery = Classes::with(['programs.major', 'programs.shift'])
+                ->orderBy('name');
+
+            if ($teacher->major_id) {
+                $classQuery->whereHas('programs', fn ($q) => $q->where('major_id', $teacher->major_id));
+            }
+            if ($teacher->subject_id) {
+                $classQuery->whereHas('programs', function ($q) use ($teacher) {
+                    $q->whereExists(function ($ms) use ($teacher) {
+                        $ms->selectRaw('1')
+                            ->from((new MajorSubject())->getTable())
+                            ->whereColumn('major_subjects.major_id', 'class_programs.major_id')
+                            ->where('major_subjects.subject_id', $teacher->subject_id)
+                            ->whereColumn('major_subjects.year_level', 'class_programs.year_level')
+                            ->whereColumn('major_subjects.semester', 'class_programs.semester');
+                    });
+                });
+            }
+
+            $classes = $classQuery->get();
+
+            $programData = $classes->flatMap(fn ($c) => $c->programs);
+
             return [
                 'major' => [
                     'id' => $teacher->major?->id,
@@ -119,9 +131,9 @@ class TeacherModuleService extends BaseService
                     'name_en' => $teacher->subject?->name_eg,
                     'name_kh' => $teacher->subject?->name_kh,
                 ],
-                'year_levels' => $classes->pluck('year_level')->filter()->unique()->values(),
-                'semesters' => $classes->pluck('semester')->filter()->unique()->values(),
-                'academic_years' => $classes->pluck('academic_year')->filter()->unique()->values(),
+                'year_levels' => $programData->pluck('year_level')->filter()->unique()->values(),
+                'semesters' => $programData->pluck('semester')->filter()->unique()->values(),
+                'academic_years' => $programData->pluck('academic_year')->filter()->unique()->values(),
                 'classes' => TeacherClassResource::collection($classes)->resolve(),
             ];
             

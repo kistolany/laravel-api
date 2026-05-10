@@ -51,4 +51,9 @@ class TeacherAttendanceController extends Controller
             new TeacherAttendanceReportResource($this->service->report($request->validated(), $request->user()))
         );
     }
+
+    public function weekly(TeacherAttendanceRangeRequest $request): JsonResponse
+    {
+        return $this->success($this->service->weekly($request->validated(), $request->user()));
+    }
 }

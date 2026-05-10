@@ -15,6 +15,7 @@ class ClassScheduleAutoGenerateConfirmRequest extends FormRequest
     {
         return [
             'schedules' => 'required|array|min:1',
+            'schedules.*.class_program_id' => 'nullable|integer|exists:class_programs,id',
             'schedules.*.class_id' => 'required|integer|exists:classes,id',
             'schedules.*.subject_id' => 'required|integer|exists:subjects,id',
             'schedules.*.teacher_id' => 'required|integer|exists:teachers,id',

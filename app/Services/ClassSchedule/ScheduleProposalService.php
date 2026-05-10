@@ -4,8 +4,9 @@ namespace App\Services\ClassSchedule;
 
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
-use App\Models\ClassSchedule;
+use App\Models\ClassProgram;
 use App\Models\ScheduleProposal;
+use App\Models\Shift;
 use App\Models\Teacher;
 use App\Models\User;
 use App\Services\BaseService;
@@ -17,6 +18,12 @@ use Illuminate\Support\Facades\Log;
 class ScheduleProposalService extends BaseService
 {
     private const RELATIONS = ['classroom', 'subject', 'shift', 'teacher', 'sentBy', 'schedule'];
+    private const WEEKEND_DAYS = ['Saturday', 'Sunday'];
+    private const WEEKEND_SHIFT_RANGES = ['07:30-10:00', '11:00-14:30', '15:00-17:30'];
+
+    public function __construct(
+        private ClassScheduleService $scheduleService
+    ) {}
 
     public function index(): Collection
     {
@@ -31,6 +38,7 @@ class ScheduleProposalService extends BaseService
     public function create(array $data, Authenticatable $sender): ScheduleProposal
     {
         return $this->trace(__FUNCTION__, function () use ($data, $sender): ScheduleProposal {
+            $data = $this->withProgramContext($data);
             $proposal = ScheduleProposal::create([
                 ...$data,
                 'sent_by' => $sender->id,
@@ -105,16 +113,15 @@ class ScheduleProposalService extends BaseService
                 $proposal->responded_at = now();
 
                 if ($data['status'] === 'accepted') {
-                    $schedule = ClassSchedule::create([
-                        'class_id' => $proposal->class_id,
+                    $schedule = $this->scheduleService->create([
+                        'class_id'   => $proposal->class_id,
                         'subject_id' => $proposal->subject_id,
                         'teacher_id' => $proposal->teacher_id,
-                        'shift_id' => $proposal->shift_id,
-                        'day_of_week' => $proposal->day_of_week,
-                        'room' => $proposal->room,
+                        'shift_id'   => $proposal->shift_id,
+                        'day_of_week'=> $proposal->day_of_week,
                         'academic_year' => $proposal->academic_year,
-                        'year_level' => $proposal->year_level,
-                        'semester' => $proposal->semester,
+                        'year_level'    => $proposal->year_level,
+                        'semester'      => $proposal->semester,
                     ]);
 
                     $proposal->schedule_id = $schedule->id;
@@ -152,6 +159,57 @@ class ScheduleProposalService extends BaseService
         }
 
         return $proposal;
+    }
+
+    private function withProgramContext(array $data): array
+    {
+        if (!empty($data['academic_year']) && !empty($data['year_level']) && !empty($data['semester'])) {
+            return $data;
+        }
+
+        $program = ClassProgram::query()
+            ->where('class_id', $data['class_id'] ?? null)
+            ->when(($data['shift_id'] ?? null) && !$this->isWeekendScheduleBlock($data), fn ($query) => $query->where(fn ($q) => $q->whereNull('shift_id')->orWhere('shift_id', $data['shift_id'])))
+            ->first();
+
+        if (!$program) {
+            throw new ApiException(
+                ResponseStatus::BAD_REQUEST,
+                'Please select a class program with academic year, year, and semester.'
+            );
+        }
+
+        $data['academic_year'] = $data['academic_year'] ?? $program->academic_year;
+        $data['year_level'] = $data['year_level'] ?? $program->year_level;
+        $data['semester'] = $data['semester'] ?? $program->semester;
+
+        if (empty($data['academic_year']) || empty($data['year_level']) || empty($data['semester'])) {
+            throw new ApiException(
+                ResponseStatus::BAD_REQUEST,
+                'The selected class program is missing academic year, year, or semester.'
+            );
+        }
+
+        return $data;
+    }
+
+    private function isWeekendScheduleBlock(array $data): bool
+    {
+        if (!in_array($data['day_of_week'] ?? null, self::WEEKEND_DAYS, true) || empty($data['shift_id'])) {
+            return false;
+        }
+
+        $shift = Shift::find($data['shift_id']);
+
+        return $shift ? in_array($this->normalizeTimeRange($shift->time_range), self::WEEKEND_SHIFT_RANGES, true) : false;
+    }
+
+    private function normalizeTimeRange(?string $value): string
+    {
+        $value = strtolower((string) $value);
+        $value = str_replace([' ', '–', '—'], ['', '-', '-'], $value);
+
+        return $value;
     }
 
     private function resolveTeacherId(?Authenticatable $user): ?int

@@ -63,12 +63,13 @@ class JwtMiddleware
     {
         $header = (string) $request->header('Authorization', '');
 
-        if (!str_starts_with($header, 'Bearer ')) {
-            return null;
+        if (str_starts_with($header, 'Bearer ')) {
+            $token = trim(substr($header, 7));
+            return $token !== '' ? $token : null;
         }
 
-        $token = trim(substr($header, 7));
-
+        // Allow token via query string for browser-opened file URLs
+        $token = trim((string) $request->query('token', ''));
         return $token !== '' ? $token : null;
     }
 }

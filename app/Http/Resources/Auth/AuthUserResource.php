@@ -73,13 +73,13 @@ class AuthUserResource extends JsonResource
             'image' => $this->image,
             'status' => $this->status,
             'role' => $this->role?->name,
-            'department' => $this->department,
-            'position' => $this->position,
-            'join_date' => $this->join_date,
-            'base_salary' => $this->base_salary,
-            'allowance' => $this->allowance,
-            'bank_name' => $this->bank_name,
-            'bank_account' => $this->bank_account,
+            'department' => $this->staffProfile?->department,
+            'position' => $this->staffProfile?->position,
+            'join_date' => $this->staffProfile?->join_date,
+            'base_salary' => $this->staffProfile?->base_salary,
+            'allowance' => $this->staffProfile?->allowance,
+            'bank_name' => $this->staffProfile?->bank_name,
+            'bank_account' => $this->staffProfile?->bank_account,
         ];
     }
 

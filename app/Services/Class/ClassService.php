@@ -10,16 +10,22 @@ use App\Exceptions\ApiException;
 use App\Http\Resources\Class\ClassResource;
 use App\Models\Classes;
 use App\Models\ClassProgram;
+use App\Models\ClassSchedule;
 use App\Models\Students;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 class ClassService extends BaseService
 {
     public function index(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = Classes::query()->with(['programs.major', 'programs.shift', 'schedules.shift'])->withCount('classStudents')->latest();
+            $query = Classes::query()
+                ->with(['programs.major', 'programs.shift'])
+                ->withCount(['classStudents as class_students_count' => function ($query) {
+                    $query->where('status', 'Active');
+                }])
+                ->latest();
 
             return $this->paginateResponse($query, ClassResource::class);
         });
@@ -28,11 +34,16 @@ class ClassService extends BaseService
     public function findById(int $id, bool $withStudents = false): Classes
     {
         return $this->trace(__FUNCTION__, function () use ($id, $withStudents): Classes {
-            $query = Classes::query();
+            $query = Classes::query()
+                ->with(['programs.major', 'programs.shift'])
+                ->withCount(['classStudents as class_students_count' => function ($query) {
+                    $query->where('status', 'Active');
+                }]);
 
-            $query->with(['major', 'shift', 'programs.major', 'programs.shift', 'schedules.shift']);
             if ($withStudents) {
-                $query->with(['students.academicInfo.major']);
+                $query->with(['students' => function ($q) {
+                    $q->wherePivot('status', 'Active')->with('academicInfo.major');
+                }]);
             }
             
             $class = $query->find($id);
@@ -72,6 +83,44 @@ class ClassService extends BaseService
         });
     }
 
+    public function stats(int $classId): array
+    {
+        return $this->trace(__FUNCTION__, function () use ($classId): array {
+            $class = Classes::with(['programs.major', 'programs.shift'])->findOrFail($classId);
+
+            $genderCounts = DB::table('students')
+                ->join('class_students', 'students.id', '=', 'class_students.student_id')
+                ->where('class_students.class_id', $classId)
+                ->whereIn('class_students.status', ['Active', 'active'])
+                ->select('students.gender', DB::raw('COUNT(*) as count'))
+                ->groupBy('students.gender')
+                ->get()
+                ->keyBy('gender');
+
+            $male   = (int) ($genderCounts->get('Male')?->count   ?? 0);
+            $female = (int) ($genderCounts->get('Female')?->count ?? 0);
+
+            $programs = $class->programs->map(fn ($p) => [
+                'id'            => $p->id,
+                'major_id'      => $p->major_id,
+                'major_name'    => $p->major?->name,
+                'shift_id'      => $p->shift_id,
+                'shift_name'    => $p->shift?->name,
+                'year_level'    => $p->year_level,
+                'semester'      => $p->semester,
+                'academic_year' => $p->academic_year,
+                'section'       => $p->section,
+            ])->values();
+
+            return [
+                'male'     => $male,
+                'female'   => $female,
+                'total'    => $male + $female,
+                'programs' => $programs,
+            ];
+        });
+    }
+
     public function delete(int $id): void
     {
         $this->trace(__FUNCTION__, function () use ($id): void {
@@ -86,17 +135,30 @@ class ClassService extends BaseService
     public function addProgram(int $classId, array $data): ClassProgram
     {
         return $this->trace(__FUNCTION__, function () use ($classId, $data): ClassProgram {
-            $validator = Validator::make($data, [
-                'major_id'   => 'nullable|exists:majors,id',
-                'shift_id'   => 'nullable|exists:shifts,id',
-                'year_level' => 'nullable|integer|min:1|max:6',
-                'semester'   => 'nullable|integer|min:1|max:2',
-            ]);
-            if ($validator->fails()) {
-                throw new ApiException(ResponseStatus::BAD_REQUEST, $validator->errors()->first());
-            }
             $class = $this->findById($classId);
-            $program = $class->programs()->create($validator->validated());
+            $program = $class->programs()->create($this->validateProgramData($classId, $data));
+            $program->load(['major', 'shift']);
+            return $program;
+        });
+    }
+
+    public function updateProgram(int $classId, int $programId, array $data): ClassProgram
+    {
+        return $this->trace(__FUNCTION__, function () use ($classId, $programId, $data): ClassProgram {
+            $program = ClassProgram::where('class_id', $classId)->where('id', $programId)->first();
+            if (!$program) {
+                throw new ApiException(ResponseStatus::NOT_FOUND, "Program not found.");
+            }
+
+            $program->update($this->validateProgramData($classId, $data, $programId));
+            ClassSchedule::where('class_program_id', $program->id)->update([
+                'class_id' => $program->class_id,
+                'shift_id' => $program->shift_id,
+                'academic_year' => $program->academic_year,
+                'year_level' => $program->year_level,
+                'semester' => $program->semester,
+            ]);
+
             $program->load(['major', 'shift']);
             return $program;
         });
@@ -108,6 +170,9 @@ class ClassService extends BaseService
             $program = ClassProgram::where('class_id', $classId)->where('id', $programId)->first();
             if (!$program) {
                 throw new ApiException(ResponseStatus::NOT_FOUND, "Program not found.");
+            }
+            if (ClassSchedule::where('class_program_id', $programId)->exists()) {
+                throw new ApiException(ResponseStatus::BAD_REQUEST, "This program is used by schedules. Update schedules before deleting it.");
             }
             $program->delete();
         });
@@ -220,15 +285,8 @@ class ClassService extends BaseService
     protected function validateExisting(array $data, ?int $ignoreId = null): array
     {
         $validator = Validator::make($data, [
-            'name'          => 'required|string|max:255',
-            'major_id'      => 'nullable|exists:majors,id',
-            'shift_id'      => 'nullable|exists:shifts,id',
-            'academic_year' => 'nullable|string|max:20',
-            'year_level'    => 'nullable|integer|min:1|max:6',
-            'semester'      => 'nullable|integer|min:1|max:2',
-            'section'       => 'nullable|string|max:50',
-            'max_students'  => 'nullable|integer|min:1',
-            'is_active'     => 'nullable|boolean',
+            'name'      => 'required|string|max:255',
+            'is_active' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -249,6 +307,16 @@ class ClassService extends BaseService
                 $message,
                 data: ['errors' => $validator->errors()]
             );
+        }
+
+        $name = trim((string) $data['name']);
+        $exists = Classes::query()
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
+            ->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))
+            ->exists();
+
+        if ($exists) {
+            throw new ApiException(ResponseStatus::EXISTING_DATA, "Class \"$name\" already exists.");
         }
 
         return $validator->validated();
@@ -322,6 +390,40 @@ class ClassService extends BaseService
         }
 
         return $validator->validated();
+    }
+
+    protected function validateProgramData(int $classId, array $data, ?int $ignoreProgramId = null): array
+    {
+        $validator = Validator::make($data, [
+            'major_id'      => 'required|exists:majors,id',
+            'shift_id'      => 'required|exists:shifts,id',
+            'academic_year' => 'required|string|max:20',
+            'year_level'    => 'required|integer|min:1|max:6',
+            'semester'      => 'required|integer|min:1|max:2',
+            'section'       => 'nullable|string|max:50',
+            'max_students'  => 'nullable|integer|min:0|max:10000',
+        ]);
+
+        if ($validator->fails()) {
+            throw new ApiException(ResponseStatus::BAD_REQUEST, $validator->errors()->first());
+        }
+
+        $validated = $validator->validated();
+        $duplicate = ClassProgram::query()
+            ->where('class_id', $classId)
+            ->where('major_id', $validated['major_id'])
+            ->where('shift_id', $validated['shift_id'])
+            ->where('academic_year', $validated['academic_year'])
+            ->where('year_level', $validated['year_level'])
+            ->where('semester', $validated['semester'])
+            ->when($ignoreProgramId, fn ($query) => $query->where('id', '!=', $ignoreProgramId))
+            ->exists();
+
+        if ($duplicate) {
+            throw new ApiException(ResponseStatus::EXISTING_DATA, "This class program already exists.");
+        }
+
+        return $validated;
     }
 
     private function resolveStudentId(mixed $value): int

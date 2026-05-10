@@ -34,13 +34,18 @@ class JwtService
                 'token' => JWT::encode($payload, $this->secret(), $this->algo()),
                 'expires_in' => $ttl,
             ];
-            
-            
         });
     }
 
+    /**
+     * Decodes a JWT token and returns the payload.
+     *
+     * @param string $token
+     * @return array
+     */
     public function decode(string $token): array
     {
+        // Note: This method will throw exceptions if the token is invalid or expired.
         return $this->trace(__FUNCTION__, function () use ($token): array {
             $this->ensureJwtLibrary();
             JWT::$leeway = (int) config('jwt.leeway', 0);
@@ -49,12 +54,14 @@ class JwtService
             
             return (array) $decoded;
             
-            
         });
     }
 
+
+    // Additional helper methods for refresh tokens, token validation, etc. can be added here.
     private function secret(): string
     {
+
         $secret = (string) config('jwt.secret');
 
         if ($secret === '') {
@@ -66,6 +73,7 @@ class JwtService
 
     private function algo(): string
     {
+    
         return (string) config('jwt.algo', 'HS256');
     }
 

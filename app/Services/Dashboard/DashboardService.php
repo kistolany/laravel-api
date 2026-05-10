@@ -133,16 +133,15 @@ class DashboardService extends BaseService
             ->join('classes', 'class_schedules.class_id', '=', 'classes.id')
             ->leftJoin('subjects', 'class_schedules.subject_id', '=', 'subjects.id')
             ->leftJoin('shifts', 'class_schedules.shift_id', '=', 'shifts.id')
+            ->leftJoin('rooms', 'class_schedules.room_id', '=', 'rooms.id')
             ->where('class_schedules.teacher_id', $teacherId)
             ->select(
                 'class_schedules.id',
                 'classes.name as class_name',
                 'subjects.name as subject_name',
                 'shifts.name as shift_name',
-                'class_schedules.room',
+                'rooms.name as room_name',
                 'class_schedules.day_of_week',
-                'class_schedules.year_level',
-                'class_schedules.semester',
             );
     }
 
@@ -370,14 +369,16 @@ class DashboardService extends BaseService
     private function classOccupancy()
     {
         return DB::table('classes')
-            ->leftJoin('class_students', 'classes.id', '=', 'class_students.class_id')
+            ->leftJoin('class_students', function ($join) {
+                $join->on('classes.id', '=', 'class_students.class_id')
+                    ->whereIn('class_students.status', ['Active', 'active']);
+            })
             ->select(
                 'classes.id',
                 'classes.name',
-                'classes.max_students',
                 DB::raw('COUNT(class_students.student_id) as enrolled')
             )
-            ->groupBy('classes.id', 'classes.name', 'classes.max_students')
+            ->groupBy('classes.id', 'classes.name')
             ->orderByDesc('enrolled')
             ->limit(8)
             ->get()
@@ -385,8 +386,8 @@ class DashboardService extends BaseService
                 'id' => $class->id,
                 'name' => $class->name,
                 'enrolled' => (int) $class->enrolled,
-                'max' => $class->max_students ? (int) $class->max_students : null,
-                'pct' => $class->max_students > 0 ? round(($class->enrolled / $class->max_students) * 100) : null,
+                'max' => null,
+                'pct' => null,
             ]);
     }
 
@@ -397,6 +398,7 @@ class DashboardService extends BaseService
             ->leftJoin('subjects', 'class_schedules.subject_id', '=', 'subjects.id')
             ->leftJoin('teachers', 'class_schedules.teacher_id', '=', 'teachers.id')
             ->leftJoin('shifts', 'class_schedules.shift_id', '=', 'shifts.id')
+            ->leftJoin('rooms', 'class_schedules.room_id', '=', 'rooms.id')
             ->where('class_schedules.day_of_week', $todayName)
             ->select(
                 'class_schedules.id',
@@ -404,7 +406,7 @@ class DashboardService extends BaseService
                 'subjects.name as subject_name',
                 DB::raw("CONCAT(teachers.first_name, ' ', teachers.last_name) as teacher_name"),
                 'shifts.name as shift_name',
-                'class_schedules.room',
+                'rooms.name as room_name',
                 'class_schedules.day_of_week',
             )
             ->orderBy('shifts.name')

@@ -105,7 +105,6 @@ class DemoDataSeeder extends Seeder
                     'phone_number' => "088123456$i",
                     'major_id' => $major->id,
                     'subject_id' => $subject->id,
-                    'is_verified' => true,
                     'join_date' => now(),
                     'address' => 'Phnom Penh, Cambodia',
                 ]

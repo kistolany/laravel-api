@@ -32,7 +32,7 @@ class ClassController extends Controller
     public function store(ClassRequest $request)
     {
         $class = $this->service->create($request->validated());
-        $class->load(['major', 'shift']);
+        $class->load(['programs.major', 'programs.shift']);
         return $this->success(new ClassResource($class), "Class created successfully!");
     }
 
@@ -45,7 +45,7 @@ class ClassController extends Controller
     public function update(ClassRequest $request, $id)
     {
         $class = $this->service->update((int) $id, $request->validated());
-        $class->load(['major', 'shift']);
+        $class->load(['programs.major', 'programs.shift']);
         return $this->success(new ClassResource($class), "Class updated successfully!");
     }
 
@@ -59,7 +59,7 @@ class ClassController extends Controller
     {
         $class = $this->service->findById($id, true);
         $class->students->load('academicInfo.major');
-        $className = $class->code ?? $class->name;
+        $className = $class->name;
         $collection = ClassStudentResource::collection($class->students);
         $collection->each(fn($r) => $r->additional(['class_name' => $className]));
         return $this->success($collection);
@@ -69,6 +69,12 @@ class ClassController extends Controller
     {
         $program = $this->service->addProgram((int) $id, $request->all());
         return $this->success(new ClassProgramResource($program), "Program added successfully!");
+    }
+
+    public function updateProgram(Request $request, $id, $programId)
+    {
+        $program = $this->service->updateProgram((int) $id, (int) $programId, $request->all());
+        return $this->success(new ClassProgramResource($program), "Program updated successfully!");
     }
 
     public function removeProgram($id, $programId)
@@ -108,5 +114,9 @@ class ClassController extends Controller
 
         return $this->success($data, 'Subject assigned to class successfully!');
     }
-}
 
+    public function stats($id)
+    {
+        return $this->success($this->service->stats((int) $id));
+    }
+}

@@ -197,22 +197,12 @@ class StudentCardService
                 return;
             }
 
-            $class->where(function (Builder $context) use ($majorId, $shiftId, $yearLevel, $semester): void {
-                $context
-                    ->where(function (Builder $direct) use ($majorId, $shiftId, $yearLevel, $semester): void {
-                        $direct
-                            ->when($majorId, fn (Builder $slot, int $value) => $slot->where('classes.major_id', $value))
-                            ->when($shiftId, fn (Builder $slot, int $value) => $slot->where('classes.shift_id', $value))
-                            ->when($yearLevel, fn (Builder $slot, int $value) => $slot->where('classes.year_level', $value))
-                            ->when($semester, fn (Builder $slot, int $value) => $slot->where('classes.semester', $value));
-                    })
-                    ->orWhereHas('programs', function (Builder $program) use ($majorId, $shiftId, $yearLevel, $semester): void {
-                        $program
-                            ->when($majorId, fn (Builder $slot, int $value) => $slot->where('major_id', $value))
-                            ->when($shiftId, fn (Builder $slot, int $value) => $slot->where('shift_id', $value))
-                            ->when($yearLevel, fn (Builder $slot, int $value) => $slot->where('year_level', $value))
-                            ->when($semester, fn (Builder $slot, int $value) => $slot->where('semester', $value));
-                    });
+            $class->whereHas('programs', function (Builder $program) use ($majorId, $shiftId, $yearLevel, $semester): void {
+                $program
+                    ->when($majorId, fn (Builder $slot, int $value) => $slot->where('major_id', $value))
+                    ->when($shiftId, fn (Builder $slot, int $value) => $slot->where('shift_id', $value))
+                    ->when($yearLevel, fn (Builder $slot, int $value) => $slot->where('year_level', $value))
+                    ->when($semester, fn (Builder $slot, int $value) => $slot->where('semester', $value));
             });
         });
     }

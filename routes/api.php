@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\ApiController\AcademicInfo\AcademicInfoController;
+use App\Http\Controllers\ApiController\AcademicSetting\AcademicTermController;
+use App\Http\Controllers\ApiController\AcademicSetting\YearLevelController;
 use App\Http\Controllers\ApiController\Auth\AuthController;
 use App\Http\Controllers\ApiController\Dashboard\DashboardController;
 use App\Http\Controllers\ApiController\AuditLog\AuditLogController;
@@ -28,12 +30,14 @@ use App\Http\Controllers\ApiController\Teacher\TeacherAvailabilityController;
 use App\Http\Controllers\ApiController\Teacher\TeacherModuleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ClassScheduleController;
 use App\Http\Controllers\ApiController\ClassSchedule\ScheduleProposalController;
+use App\Http\Controllers\ApiController\Room\RoomController;
 use App\Http\Controllers\ApiController\LeaveRequestController;
 use App\Http\Controllers\ApiController\Chat\ChatController;
 use App\Http\Controllers\ApiController\Holiday\HolidayController;
 use App\Http\Controllers\ApiController\Notification\NotificationController;
 use App\Http\Controllers\ApiController\StaffAttendance\StaffAttendanceController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
+use App\Http\Controllers\ApiController\TeacherAttendance\TeacherDailyScheduleController;
 use App\Http\Controllers\ApiController\SubjectClassroom\SubjectClassroomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -55,9 +59,11 @@ Route::prefix('v1')->group(function () {
         Route::get('classes', [LookupController::class, 'classes']);
         Route::get('student-types', [LookupController::class, 'studentTypes']);
         Route::get('stages', [LookupController::class, 'stages']);
+        Route::get('year-levels', [LookupController::class, 'yearLevels']);
         Route::get('batch-years', [LookupController::class, 'batchYears']);
         Route::get('academic-years', [LookupController::class, 'academicYears']);
         Route::get('semesters', [LookupController::class, 'semesters']);
+        Route::get('academic-terms', [LookupController::class, 'academicTerms']);
         Route::get('study-days', [LookupController::class, 'studyDays']);
         Route::get('score-filters', [LookupController::class, 'scoreFilters']);
         Route::get('attendance-filters', [LookupController::class, 'attendanceFilters']);
@@ -92,23 +98,15 @@ Route::prefix('v1')->group(function () {
         });
     });
 
-    Route::prefix('teacher-auth')->group(function () {
-        Route::get('list', [TeacherAuthController::class, 'index'])->middleware('auth.jwt', 'permission:teacher.view|teacher.active.view');
-        Route::get('archived', [TeacherAuthController::class, 'archived'])->middleware('auth.jwt', 'permission:teacher.archive.view');
-        Route::delete('{id}', [TeacherAuthController::class, 'destroy'])->middleware('auth.jwt', 'permission:teacher.delete');
-        Route::patch('{id}/restore', [TeacherAuthController::class, 'restore'])->middleware('auth.jwt', 'permission:teacher.update|teacher.delete');
-        Route::post('register', [TeacherAuthController::class, 'register'])->middleware('auth.jwt', 'permission:teacher.create');
+    Route::prefix('teacher-auth')->middleware('auth.jwt')->group(function () {
+        Route::get('list', [TeacherAuthController::class, 'index'])->middleware('permission:teacher.view|teacher.active.view');
+        Route::get('archived', [TeacherAuthController::class, 'archived'])->middleware('permission:teacher.archive.view');
+        Route::delete('{id}', [TeacherAuthController::class, 'destroy'])->middleware('permission:teacher.delete');
+        Route::patch('{id}/restore', [TeacherAuthController::class, 'restore'])->middleware('permission:teacher.update|teacher.delete');
+        Route::post('register', [TeacherAuthController::class, 'register'])->middleware('permission:teacher.create');
         Route::post('upload-image', [TeacherAuthController::class, 'uploadImage']);
-        Route::post('{id}', [TeacherAuthController::class, 'update'])->middleware('auth.jwt', 'permission:teacher.update|teacher.status.update');
-        Route::post('login', [TeacherAuthController::class, 'login'])->middleware('throttle:login');
-        Route::post('refresh', [TeacherAuthController::class, 'refresh']);
-
-        Route::middleware('auth.teacher')->group(function () {
-            Route::get('me', [TeacherAuthController::class, 'me']);
-            Route::post('logout', [TeacherAuthController::class, 'logout']);
-            Route::post('logout-all', [TeacherAuthController::class, 'logoutAll']);
-            Route::post('revoke', [TeacherAuthController::class, 'revoke']);
-        });
+        Route::get('{id}/file', [TeacherAuthController::class, 'viewFile'])->middleware('permission:teacher.view|teacher.active.view');
+        Route::post('{id}', [TeacherAuthController::class, 'update'])->middleware('permission:teacher.update|teacher.status.update');
     });
 
     Route::middleware('auth.jwt')->group(function () {
@@ -116,10 +114,13 @@ Route::prefix('v1')->group(function () {
         Route::get('dashboard/teacher-stats', [DashboardController::class, 'teacherStats']);
 
         // Teacher Attendance routes
-        Route::get('teacher-attendances',         [TeacherAttendanceController::class, 'index'])->middleware('permission:teacher_attendance.view');
-        Route::post('teacher-attendances/bulk',   [TeacherAttendanceController::class, 'bulk'])->middleware('permission:teacher_attendance.create');
-        Route::get('teacher-attendances/history', [TeacherAttendanceController::class, 'history'])->middleware('permission:teacher_attendance.view');
-        Route::get('teacher-attendances/report',  [TeacherAttendanceController::class, 'report'])->middleware('permission:teacher_attendance.view');
+        Route::get('teacher-attendances',                [TeacherAttendanceController::class, 'index'])->middleware('permission:teacher_attendance.view');
+        Route::post('teacher-attendances/bulk',          [TeacherAttendanceController::class, 'bulk'])->middleware('permission:teacher_attendance.create');
+        Route::get('teacher-attendances/history',        [TeacherAttendanceController::class, 'history'])->middleware('permission:teacher_attendance.view');
+        Route::get('teacher-attendances/report',         [TeacherAttendanceController::class, 'report'])->middleware('permission:teacher_attendance.view');
+        Route::get('teacher-attendances/weekly',         [TeacherAttendanceController::class, 'weekly'])->middleware('permission:teacher_attendance.view');
+        Route::get('teacher-schedules/daily',            [TeacherDailyScheduleController::class, 'daily'])->middleware('permission:teacher_attendance.view');
+        Route::post('teacher-schedules/bulk',            [TeacherDailyScheduleController::class, 'bulkBySchedule'])->middleware('permission:teacher_attendance.create');
 
         // Staff Attendance routes
         Route::get('staff-attendances', [StaffAttendanceController::class, 'index'])->middleware('permission:staff_attendance.view|user.view');
@@ -177,12 +178,29 @@ Route::prefix('v1')->group(function () {
         Route::delete('classes/{id}', [ClassController::class, 'destroy'])->middleware('permission:class.delete');
         Route::get('classes/{id}/students', [ClassController::class, 'students'])->middleware('permission:class.students.view');
         Route::post('classes/{id}/programs', [ClassController::class, 'addProgram'])->middleware('permission:class.create');
+        Route::put('classes/{id}/programs/{programId}', [ClassController::class, 'updateProgram'])->middleware('permission:class.create');
         Route::delete('classes/{id}/programs/{programId}', [ClassController::class, 'removeProgram'])->middleware('permission:class.create');
         Route::get('classes/{id}/subjects', [ClassController::class, 'subjects'])->middleware('permission:class.subjects.view');
+        Route::get('classes/{id}/stats', [ClassController::class, 'stats'])->middleware('permission:class.view');
         Route::post('classes/{id}/students', [ClassController::class, 'addStudent'])->middleware('permission:class.students.add');
         Route::delete('classes/{id}/students/{studentId}', [ClassController::class, 'removeStudent'])->middleware('permission:class.students.add');
         Route::post('classes/{id}/students/by-major', [ClassController::class, 'addStudentsByMajor'])->middleware('permission:class.students.add_by_major');
         Route::post('classes/{id}/subjects', [ClassController::class, 'assignSubject'])->middleware('permission:class.subjects.assign');
+
+        // Room routes
+        Route::get('rooms', [RoomController::class, 'index'])->middleware('permission:room.view');
+        Route::post('rooms', [RoomController::class, 'store'])->middleware('permission:room.manage');
+        Route::get('rooms/{id}', [RoomController::class, 'show'])->middleware('permission:room.view');
+        Route::put('rooms/{id}', [RoomController::class, 'update'])->middleware('permission:room.manage');
+        Route::delete('rooms/{id}', [RoomController::class, 'destroy'])->middleware('permission:room.manage');
+
+        // Academic structure settings
+        Route::apiResource('year-levels', YearLevelController::class)->only(['index', 'show'])->middleware('permission:academic_info.view|role.view');
+        Route::apiResource('year-levels', YearLevelController::class)->only(['store', 'update'])->middleware('permission:academic_info.update|role.update');
+        Route::apiResource('year-levels', YearLevelController::class)->only(['destroy'])->middleware('permission:academic_info.delete|role.update');
+        Route::apiResource('academic-terms', AcademicTermController::class)->only(['index', 'show'])->middleware('permission:academic_info.view|role.view');
+        Route::apiResource('academic-terms', AcademicTermController::class)->only(['store', 'update'])->middleware('permission:academic_info.update|role.update');
+        Route::apiResource('academic-terms', AcademicTermController::class)->only(['destroy'])->middleware('permission:academic_info.delete|role.update');
 
         // Class Schedule routes
         Route::get('class-schedules', [ClassScheduleController::class, 'index'])->middleware('permission:class_schedule.view');

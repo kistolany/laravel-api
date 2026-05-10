@@ -11,9 +11,15 @@ use App\Models\User;
 use App\Services\BaseService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class ChatService extends BaseService
 {
+    private function isOnline(int $userId): bool
+    {
+        // Check both system user and teacher cache keys
+        return Cache::has('user-online-user-' . $userId) || Cache::has('user-online-teacher-' . $userId);
+    }
     public function users(User $user, array $filters = []): Collection
     {
         return $this->trace(__FUNCTION__, function () use ($user, $filters): Collection {
@@ -228,6 +234,7 @@ class ChatService extends BaseService
                 'full_name' => $otherUser->full_name ?? $otherUser->username,
                 'image' => $otherUser->image ?? '',
                 'status' => $otherUser->status ?? 'Active',
+                'is_online' => $this->isOnline($otherUser->id),
             ] : null,
             'is_muted' => $conversation->user_one_id === $userId
                 ? (bool) $conversation->user_one_muted
@@ -261,6 +268,7 @@ class ChatService extends BaseService
             'full_name' => $user->full_name ?? $user->username,
             'image' => $user->image ?? '',
             'status' => $user->status ?? 'Active',
+            'is_online' => $this->isOnline($user->id),
             'role' => $user->role?->name ?? '',
         ];
     }

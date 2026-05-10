@@ -7,6 +7,7 @@ use App\Http\Resources\Auth\UserResource;
 use App\Models\RefreshToken;
 use App\Models\Role;
 use App\Models\User;
+use App\Models\UserStaffProfile;
 use App\Traits\Paginatable;
 use App\Enums\ResponseStatus;
 use App\Exceptions\ApiException;
@@ -66,7 +67,7 @@ class AuthService
                 $imagePath = $this->uploadImage($data['image']);
             }
             
-            return User::create([
+            $user = User::create([
                 'username' => $data['username'],
                 'password_hash' => Hash::make($data['password']),
                 'role_id' => $roleId,
@@ -75,15 +76,12 @@ class AuthService
                 'status' => $data['status'] ?? 'Active',
                 'full_name' => $data['full_name'] ?? null,
                 'phone' => $data['phone'] ?? null,
-                'department' => $data['department'] ?? null,
-                'position' => $data['position'] ?? null,
-                'join_date' => $data['join_date'] ?? null,
-                'base_salary' => $data['base_salary'] ?? null,
-                'allowance' => $data['allowance'] ?? null,
-                'bank_name' => $data['bank_name'] ?? null,
-                'bank_account' => $data['bank_account'] ?? null,
                 'image' => $imagePath,
             ]);
+
+            $this->syncStaffProfile($user->id, $data);
+
+            return $user->load('role', 'staffProfile');
         });
     }
 
@@ -123,15 +121,6 @@ class AuthService
                 $updates['account_purpose'] = $data['account_purpose'];
             }
 
-            foreach ([
-                'department', 'position', 'join_date', 'base_salary', 
-                'allowance', 'bank_name', 'bank_account'
-            ] as $field) {
-                if (isset($data[$field])) {
-                    $updates[$field] = $data[$field];
-                }
-            }
-            
             // Only update password if a new one is provided
             if (!empty($data['password'])) {
                 $updates['password_hash'] = Hash::make($data['password']);
@@ -143,8 +132,10 @@ class AuthService
             }
             
             $user->update($updates);
-            
-            return $user->load('role');
+
+            $this->syncStaffProfile($user->id, $data);
+
+            return $user->load('role', 'staffProfile');
             
             
         });
@@ -184,7 +175,7 @@ class AuthService
     public function listUsers(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = User::with(['role', 'teacher', 'student'])->latest();
+            $query = User::with(['role', 'teacher', 'student', 'staffProfile'])->latest();
             Log::info('Listing users with filters', request()->only(['search', 'role_id', 'status']));
             return $this->paginateResponse($query, UserResource::class);
             
@@ -396,6 +387,27 @@ class AuthService
         });
     }
 
+    private function syncStaffProfile(int $userId, array $data): void
+    {
+        $fields = ['department', 'position', 'join_date', 'base_salary', 'allowance', 'bank_name', 'bank_account'];
+        $profileData = [];
+
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $data)) {
+                $profileData[$field] = $data[$field];
+            }
+        }
+
+        if (empty($profileData)) {
+            return;
+        }
+
+        UserStaffProfile::updateOrCreate(
+            ['user_id' => $userId],
+            $profileData
+        );
+    }
+
     private function issueTokens(User $user, string $ip, ?string $userAgent): array
     {
         return DB::transaction(function () use ($user, $ip, $userAgent) {
@@ -456,7 +468,7 @@ class AuthService
     public function profile(User $user): User
     {
         return $this->trace(__FUNCTION__, function () use ($user): User {
-            $user->loadMissing('role.permissions');
+            $user->loadMissing('role.permissions', 'staffProfile');
 
             if (!$user->teacher_id && $user->hasRole('Teacher')) {
                 $this->resolveTeacherForUser($user);
@@ -469,6 +481,14 @@ class AuthService
 
     private function identityFieldsForRole(int $roleId, array $data, ?User $existingUser = null): array
     {
+        if (($data['link_mode'] ?? 'linked') === 'skipped') {
+            return [
+                'student_id' => null,
+                'teacher_id' => null,
+                'staff_id' => null,
+            ];
+        }
+
         $roleName = Role::whereKey($roleId)->value('name');
         $identityType = $this->identityTypeForRole($roleName);
 

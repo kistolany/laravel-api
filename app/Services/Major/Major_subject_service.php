@@ -58,13 +58,10 @@ class Major_subject_service extends BaseService
             $programs = $class->programs()->get();
 
             if ($programs->isEmpty()) {
-                // Fallback to classes.major_id if no programs defined
-                return MajorSubject::with(['major', 'subject'])
-                    ->where('major_id', $class->major_id)
-                    ->when($class->year_level, fn ($q) => $q->where('year_level', $class->year_level))
-                    ->when($class->semester,   fn ($q) => $q->where('semester',   $class->semester))
-                    ->orderBy('year_level')->orderBy('semester')->orderBy('subject_id')
-                    ->get();
+                return Subject::with([])->orderBy('name')->get()->map(fn ($s) => (object)[
+                    'id' => null, 'major_id' => null, 'subject_id' => $s->id, 'year_level' => null, 'semester' => null,
+                    'major' => null, 'subject' => $s,
+                ]);
             }
 
             // Build OR conditions for each program
@@ -145,9 +142,9 @@ class Major_subject_service extends BaseService
             // Otherwise resolve from class programs (preferred) or class columns
             if (empty($data['major_id'])) {
                 $program = $class->programs()->first();
-                $data['major_id']   = $program?->major_id   ?? $class->major_id;
-                $data['year_level'] = $data['year_level']   ?? $program?->year_level ?? $class->year_level;
-                $data['semester']   = $data['semester']     ?? $program?->semester   ?? $class->semester;
+                $data['major_id']   = $program?->major_id;
+                $data['year_level'] = $data['year_level']   ?? $program?->year_level;
+                $data['semester']   = $data['semester']     ?? $program?->semester;
             }
 
             return $this->create($data);

@@ -220,14 +220,14 @@ class StudentService extends BaseService
             $q->whereHas('academicInfo', fn($sub) => $sub->where('batch_year', $batchYear));
         });
 
-        // Filter by academic year (class context)
+        // Filter by academic year (via class_programs)
         $query->when(request('academic_year'), function ($q, $academicYear) {
-            $q->whereHas('classes', fn($sub) => $sub->where('classes.academic_year', $academicYear));
+            $q->whereHas('classes.programs', fn($sub) => $sub->where('class_programs.academic_year', $academicYear));
         });
 
-        // Filter by semester (class context)
+        // Filter by semester (via class_programs)
         $query->when(request('semester'), function ($q, $semester) {
-            $q->whereHas('classes', fn($sub) => $sub->where('classes.semester', $semester));
+            $q->whereHas('classes.programs', fn($sub) => $sub->where('class_programs.semester', $semester));
         });
 
         // Filter by study_days (study year / schedule)

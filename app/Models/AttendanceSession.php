@@ -11,16 +11,17 @@ class AttendanceSession extends Model
     protected $table = 'attendance_sessions';
 
     protected $fillable = [
-        'teacher_id',
         'class_id',
-        'major_id',
         'subject_id',
+        'major_id',
         'shift_id',
         'academic_year',
         'year_level',
         'semester',
         'session_date',
         'session_number',
+        'teacher_id',
+        'actual_teacher_id',
     ];
 
     protected $casts = [
@@ -38,6 +39,12 @@ class AttendanceSession extends Model
     public function teacher(): BelongsTo
     {
         return $this->belongsTo(Teacher::class, 'teacher_id');
+    }
+
+    // Who actually taught this session — null means the original scheduled teacher
+    public function actualTeacher(): BelongsTo
+    {
+        return $this->belongsTo(Teacher::class, 'actual_teacher_id');
     }
 
     public function major(): BelongsTo

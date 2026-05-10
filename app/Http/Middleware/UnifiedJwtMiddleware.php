@@ -46,11 +46,14 @@ class UnifiedJwtMiddleware
 
         if ($type === 'teacher') {
             $teacher = Teacher::find($id);
-            if (!$teacher || !$teacher->is_verified) {
+            if (!$teacher) {
                 return (new ApiException(ResponseStatus::UNAUTHORIZED, 'Unauthorized.'))->render($request);
             }
             Auth::setUser($teacher);
             $request->setUserResolver(fn () => $teacher);
+
+            // 🟢 Track Online Status (Teacher)
+            \Illuminate\Support\Facades\Cache::put('user-online-teacher-' . $id, true, now()->addMinutes(2));
         } else {
             $user = User::find($id);
             if (!$user || $user->status !== 'Active') {
@@ -58,6 +61,9 @@ class UnifiedJwtMiddleware
             }
             Auth::setUser($user);
             $request->setUserResolver(fn () => $user);
+
+            // 🟢 Track Online Status (System User)
+            \Illuminate\Support\Facades\Cache::put('user-online-user-' . $id, true, now()->addMinutes(2));
         }
 
         return $next($request);
@@ -67,12 +73,13 @@ class UnifiedJwtMiddleware
     {
         $header = (string) $request->header('Authorization', '');
 
-        if (!str_starts_with($header, 'Bearer ')) {
-            return null;
+        if (str_starts_with($header, 'Bearer ')) {
+            $token = trim(substr($header, 7));
+            return $token !== '' ? $token : null;
         }
 
-        $token = trim(substr($header, 7));
-
+        // Allow token via query string for browser-opened file URLs
+        $token = trim((string) $request->query('token', ''));
         return $token !== '' ? $token : null;
     }
 }

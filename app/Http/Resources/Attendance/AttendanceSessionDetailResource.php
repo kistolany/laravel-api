@@ -23,15 +23,14 @@ class AttendanceSessionDetailResource extends JsonResource
 
         return [
             'id' => $session->id,
-            'academic_year' => $session->academic_year ?? $classroom?->academic_year,
-            'year_level' => $session->year_level ?? $classroom?->year_level,
-            'semester' => $session->semester ?? $classroom?->semester,
+            'academic_year' => $session->academic_year,
+            'year_level' => $session->year_level,
+            'semester' => $session->semester,
             'session_date' => $this->formatDate($session->session_date),
             'session_number' => $session->session_number,
             'class' => [
-                'id' => $classroom?->id,
-                'code' => $classroom?->code,
-                'section' => $classroom?->section,
+                'id'   => $classroom?->id,
+                'name' => $classroom?->name,
             ],
             'major' => [
                 'id' => $major?->id,

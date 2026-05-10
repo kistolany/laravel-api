@@ -20,7 +20,6 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'auth.jwt' => \App\Http\Middleware\JwtMiddleware::class,
-            'auth.teacher' => \App\Http\Middleware\TeacherJwtMiddleware::class,
             'auth.unified' => \App\Http\Middleware\UnifiedJwtMiddleware::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'permission' => \App\Http\Middleware\PermissionMiddleware::class,

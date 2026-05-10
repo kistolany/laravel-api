@@ -60,9 +60,8 @@ class TeacherAttendanceHistoryResource extends JsonResource
             'year_level' => $this->year_level,
             'semester' => $this->semester,
             'class' => $this->classroom ? [
-                'id' => $this->classroom->id,
-                'code' => $this->classroom->code,
-                'section' => $this->classroom->section,
+                'id'   => $this->classroom->id,
+                'name' => $this->classroom->name,
             ] : null,
             'major' => $this->major ? [
                 'id' => $this->major->id,

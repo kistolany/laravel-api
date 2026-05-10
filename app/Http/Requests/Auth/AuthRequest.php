@@ -52,6 +52,7 @@ class AuthRequest extends FormRequest
             'student_id' => 'nullable|integer|exists:students,id',
             'teacher_id' => 'nullable|integer|exists:teachers,id',
             'staff_id' => 'nullable|string|max:50',
+            'link_mode' => 'nullable|string|in:linked,skipped',
             'department' => 'nullable|string|max:255',
             'position' => 'nullable|string|max:255',
             'join_date' => 'nullable|date',
@@ -84,6 +85,7 @@ class AuthRequest extends FormRequest
             'student_id' => 'nullable|integer|exists:students,id',
             'teacher_id' => 'nullable|integer|exists:teachers,id',
             'staff_id' => 'nullable|string|max:50',
+            'link_mode' => 'nullable|string|in:linked,skipped',
             'department' => 'nullable|string|max:255',
             'position' => 'nullable|string|max:255',
             'join_date' => 'nullable|date',
@@ -157,12 +159,13 @@ class AuthRequest extends FormRequest
 
             $roleName = Role::whereKey($roleId)->value('name');
             $identityType = $this->identityTypeForRole($roleName);
+            $linkSkipped = $this->input('link_mode') === 'skipped';
 
-            if ($identityType === 'teacher' && !$this->filled('teacher_id')) {
+            if (!$linkSkipped && $identityType === 'teacher' && !$this->filled('teacher_id')) {
                 $validator->errors()->add('teacher_id', 'Please link this user to a teacher.');
             }
 
-            if ($identityType === 'student' && !$this->filled('student_id')) {
+            if (!$linkSkipped && $identityType === 'student' && !$this->filled('student_id')) {
                 $validator->errors()->add('student_id', 'Please link this user to a student.');
             }
 

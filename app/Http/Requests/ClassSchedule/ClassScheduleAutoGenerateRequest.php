@@ -15,6 +15,7 @@ class ClassScheduleAutoGenerateRequest extends FormRequest
     {
         return [
             'slots' => 'required|array|min:1',
+            'slots.*.class_program_id' => 'nullable|integer|exists:class_programs,id',
             'slots.*.class_id' => 'required|integer|exists:classes,id',
             'slots.*.subject_id' => 'required|integer|exists:subjects,id',
             'slots.*.shift_id' => 'required|integer|exists:shifts,id',
