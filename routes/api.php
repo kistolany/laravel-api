@@ -38,6 +38,7 @@ use App\Http\Controllers\ApiController\Notification\NotificationController;
 use App\Http\Controllers\ApiController\StaffAttendance\StaffAttendanceController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherAttendanceController;
 use App\Http\Controllers\ApiController\TeacherAttendance\TeacherDailyScheduleController;
+use App\Http\Controllers\ApiController\TeacherAttendance\MakeupSessionController;
 use App\Http\Controllers\ApiController\SubjectClassroom\SubjectClassroomController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -121,6 +122,12 @@ Route::prefix('v1')->group(function () {
         Route::get('teacher-attendances/weekly',         [TeacherAttendanceController::class, 'weekly'])->middleware('permission:teacher_attendance.view');
         Route::get('teacher-schedules/daily',            [TeacherDailyScheduleController::class, 'daily'])->middleware('permission:teacher_attendance.view');
         Route::post('teacher-schedules/bulk',            [TeacherDailyScheduleController::class, 'bulkBySchedule'])->middleware('permission:teacher_attendance.create');
+
+        // Makeup Sessions routes
+        Route::get('teacher-makeups',                    [MakeupSessionController::class, 'index'])->middleware('permission:teacher_attendance.view');
+        Route::post('teacher-makeups',                   [MakeupSessionController::class, 'store'])->middleware('permission:teacher_attendance.create');
+        Route::patch('teacher-makeups/{id}',             [MakeupSessionController::class, 'update'])->middleware('permission:teacher_attendance.create')->whereNumber('id');
+        Route::delete('teacher-makeups/{id}',            [MakeupSessionController::class, 'destroy'])->middleware('permission:teacher_attendance.create')->whereNumber('id');
 
         // Staff Attendance routes
         Route::get('staff-attendances', [StaffAttendanceController::class, 'index'])->middleware('permission:staff_attendance.view|user.view');
@@ -207,10 +214,13 @@ Route::prefix('v1')->group(function () {
         Route::post('class-schedules', [ClassScheduleController::class, 'store'])->middleware('permission:class_schedule.create');
         Route::post('class-schedules/auto-generate', [ClassScheduleController::class, 'autoGenerate'])->middleware('permission:class_schedule.create');
         Route::post('class-schedules/auto-generate/confirm', [ClassScheduleController::class, 'autoGenerateConfirm'])->middleware('permission:class_schedule.create');
+        Route::get('class-schedules/archived', [ClassScheduleController::class, 'archived'])->middleware('permission:class_schedule.view');
         Route::get('class-schedules/class/{classId}', [ClassScheduleController::class, 'byClass'])->middleware('permission:class_schedule.view');
         Route::get('class-schedules/{id}', [ClassScheduleController::class, 'show'])->middleware('permission:class_schedule.view');
         Route::put('class-schedules/{id}', [ClassScheduleController::class, 'update'])->middleware('permission:class_schedule.update');
         Route::delete('class-schedules/{id}', [ClassScheduleController::class, 'destroy'])->middleware('permission:class_schedule.delete');
+        Route::post('class-schedules/{id}/archive', [ClassScheduleController::class, 'archive'])->middleware('permission:class_schedule.delete');
+        Route::post('class-schedules/{id}/restore', [ClassScheduleController::class, 'restore'])->middleware('permission:class_schedule.delete');
 
         // Attendance routes
         Route::get('attendance-sessions', [AttendanceSessionController::class, 'index'])->middleware('permission:attendance.view');

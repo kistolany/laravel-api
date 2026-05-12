@@ -21,6 +21,7 @@ class TeacherAttendance extends Model
         'replace_teacher_id',
         'replace_status',
         'replace_subject_id',
+        'replace_shift_id',
     ];
 
     protected $casts = [
@@ -50,5 +51,10 @@ class TeacherAttendance extends Model
     public function replaceSubject(): BelongsTo
     {
         return $this->belongsTo(Subject::class, 'replace_subject_id');
+    }
+
+    public function replaceShift(): BelongsTo
+    {
+        return $this->belongsTo(Shift::class, 'replace_shift_id');
     }
 }

@@ -139,7 +139,7 @@ class TeacherAuthController extends Controller
         }
 
         $meta        = stream_get_meta_data($stream);
-        $contentType = 'application/octet-stream';
+        $contentType = null;
         foreach (($meta['wrapper_data'] ?? []) as $header) {
             if (stripos($header, 'Content-Type:') === 0) {
                 $contentType = trim(substr($header, 13));
@@ -149,6 +149,41 @@ class TeacherAuthController extends Controller
 
         $filename = basename(parse_url($url, PHP_URL_PATH));
 
+        // Try to resolve MIME from file extension in the stored URL
+        if (!$contentType || $contentType === 'application/octet-stream') {
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            $contentType = match($ext) {
+                'pdf'        => 'application/pdf',
+                'jpg','jpeg' => 'image/jpeg',
+                'png'        => 'image/png',
+                'gif'        => 'image/gif',
+                'webp'       => 'image/webp',
+                'doc'        => 'application/msword',
+                'docx'       => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                default      => null,
+            } ?? $contentType ?? 'application/octet-stream';
+        }
+
+        // Last resort: sniff the first bytes of the stream to detect PDF or image
+        if ($contentType === 'application/octet-stream') {
+            $header4 = fread($stream, 4);
+            rewind($stream) ?: fseek($stream, 0);
+            if ($header4 !== false) {
+                if (str_starts_with($header4, '%PDF')) {
+                    $contentType = 'application/pdf';
+                    $filename    = $filename ?: 'document.pdf';
+                } elseif (str_starts_with($header4, "\xFF\xD8\xFF")) {
+                    $contentType = 'image/jpeg';
+                } elseif (str_starts_with($header4, "\x89PNG")) {
+                    $contentType = 'image/png';
+                }
+                // rebuild stream since rewind may not work on http wrappers
+                fclose($stream);
+                $stream = @fopen($fetchUrl, 'r', false, $ctx);
+                if (!$stream) return redirect($url);
+            }
+        }
+
         return response()->stream(function () use ($stream) {
             while (!feof($stream)) {
                 echo fread($stream, 8192);
@@ -156,9 +191,10 @@ class TeacherAuthController extends Controller
             }
             fclose($stream);
         }, 200, [
-            'Content-Type'        => $contentType,
-            'Content-Disposition' => "inline; filename=\"{$filename}\"",
-            'Cache-Control'       => 'public, max-age=300',
+            'Content-Type'                     => $contentType,
+            'Content-Disposition'              => "inline; filename=\"{$filename}\"",
+            'Cache-Control'                    => 'public, max-age=300',
+            'Access-Control-Expose-Headers'    => 'Content-Disposition, Content-Type',
         ]);
     }
 

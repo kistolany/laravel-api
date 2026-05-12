@@ -68,8 +68,8 @@ class TeacherDailyScheduleService extends BaseService
             $attendances = TeacherAttendance::query()
                 ->whereIn('teacher_id', $teacherIds)
                 ->where('attendance_date', $date)
-                ->select('id', 'teacher_id', 'schedule_id', 'session', 'status', 'note', 'replace_teacher_id', 'replace_status', 'replace_subject_id')
-                ->with(['replaceTeacher:id,first_name,last_name', 'replaceSubject:id,name'])
+                ->select('id', 'teacher_id', 'schedule_id', 'session', 'status', 'note', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'replace_shift_id')
+                ->with(['replaceTeacher:id,first_name,last_name', 'replaceSubject:id,name', 'replaceShift:id,name'])
                 ->get()
                 ->groupBy(fn ($a) => $a->schedule_id . '_' . $a->session);
 
@@ -181,6 +181,8 @@ class TeacherDailyScheduleService extends BaseService
                 'replace_teacher_id' => isset($r['replace_teacher_id']) ? (int) $r['replace_teacher_id'] : null,
                 'replace_status'     => $r['replace_status'] ?? null,
                 'replace_subject_id' => isset($r['replace_subject_id']) ? (int) $r['replace_subject_id'] : null,
+                // replace_shift_id: set when substitute comes from a different shift
+                'replace_shift_id'   => isset($r['replace_shift_id']) ? (int) $r['replace_shift_id'] : null,
                 'created_at'         => $now,
                 'updated_at'         => $now,
             ])->all();
@@ -189,7 +191,7 @@ class TeacherDailyScheduleService extends BaseService
             TeacherAttendance::upsert(
                 $rows,
                 ['schedule_id', 'attendance_date', 'session'],
-                ['teacher_id', 'status', 'note', 'recorded_by', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'updated_at']
+                ['teacher_id', 'status', 'note', 'recorded_by', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'replace_shift_id', 'updated_at']
             );
 
             $summary = DB::table('teacher_attendances')
@@ -223,6 +225,9 @@ class TeacherDailyScheduleService extends BaseService
             'replace_status'       => $att?->replace_status ?? 'Present',
             'replace_subject_id'   => $att?->replace_subject_id,
             'replace_subject_name' => $att?->replaceSubject?->name,
+            // Cross-shift substitute: which shift the substitute actually belongs to
+            'replace_shift_id'     => $att?->replace_shift_id,
+            'replace_shift_name'   => $att?->replaceShift?->name,
             'is_saved'             => $att !== null,
         ];
     }
@@ -232,9 +237,13 @@ class TeacherDailyScheduleService extends BaseService
         if ($daySchedules->isEmpty()) return [];
 
         $teacherIds = $teachers->pluck('id')->all();
-        $busy = $daySchedules
-            ->groupBy(fn (ClassSchedule $s) => $s->teacher_id . '_' . $s->shift_id)
-            ->map(fn () => true);
+
+        // Track which teachers are already teaching on this day (by teacher_id → [shift_ids])
+        // A teacher busy on shift X can still substitute for a class on shift Y (cross-shift).
+        // A teacher is truly unavailable only if they teach the SAME shift on the same day.
+        $busyOnShift = $daySchedules
+            ->groupBy('teacher_id')
+            ->map(fn (Collection $schedules) => $schedules->pluck('shift_id')->unique()->values()->all());
 
         $contextByTeacher = $contextSchedules->groupBy('teacher_id');
 
@@ -249,46 +258,77 @@ class TeacherDailyScheduleService extends BaseService
             }
 
             $slotOptions = [];
+            $slotContext = $this->replacementContext($slot, $original->major_id);
+
             foreach ($teachers as $candidate) {
                 if ($candidate->id === $slot->teacher_id) continue;
-                if ($busy->has($candidate->id . '_' . $slot->shift_id)) continue;
 
-                $slotContext = $this->replacementContext($slot, $original->major_id);
+                // Skip if already teaching the SAME shift on this day
+                $candidateBusyShifts = $busyOnShift[$candidate->id] ?? [];
+                if (in_array($slot->shift_id, $candidateBusyShifts, false)) continue;
+
+                // Detect cross-shift: candidate teaches a different shift on this day
+                $isCrossShift = !empty($candidateBusyShifts);
+                $candidateShiftId = $isCrossShift ? $candidateBusyShifts[0] : null;
+
+                // Match by major + year_level (cross-shift removes shift constraint)
                 $subjectSchedules = $contextByTeacher->get($candidate->id, collect())
-                    ->filter(fn (ClassSchedule $s) => $this->matchesReplacementContext($slotContext, $s, $candidate->major_id))
+                    ->filter(fn (ClassSchedule $s) => $this->matchesReplacementContextCrossShift($slotContext, $s, $candidate->major_id, $isCrossShift))
                     ->filter(fn (ClassSchedule $s) => $s->subject_id)
-                    ->unique(fn (ClassSchedule $s) => $s->subject_id . '_' . $s->shift_id . '_' . ($s->year_level ?? $s->classProgram?->year_level))
+                    ->unique(fn (ClassSchedule $s) => $s->subject_id . '_' . ($s->year_level ?? $s->classProgram?->year_level))
                     ->sortBy('subject.name')
                     ->values();
 
                 if ($subjectSchedules->isEmpty()) continue;
 
                 $subjects = $subjectSchedules->map(fn (ClassSchedule $s) => [
-                    'id' => $s->subject_id,
-                    'name' => $s->subject?->name,
-                    'shift_id' => $s->shift_id,
+                    'id'         => $s->subject_id,
+                    'name'       => $s->subject?->name,
+                    'shift_id'   => $s->shift_id,
                     'year_level' => $s->year_level ?? $s->classProgram?->year_level,
                 ])->values();
 
                 $preferred = $subjectSchedules->first();
 
                 $slotOptions[] = [
-                    'id' => $candidate->id,
-                    'name' => trim($candidate->first_name . ' ' . $candidate->last_name),
-                    'major_id' => $candidate->major_id,
-                    'subject_id' => $preferred->subject_id,
-                    'subject_name' => $preferred->subject?->name,
-                    'year_level' => $slotContext['year_level'],
-                    'shift_id' => $slotContext['shift_id'],
-                    'study_group' => $slotContext['study_group'],
-                    'subjects' => $subjects,
+                    'id'            => $candidate->id,
+                    'name'          => trim($candidate->first_name . ' ' . $candidate->last_name),
+                    'major_id'      => $candidate->major_id,
+                    'subject_id'    => $preferred->subject_id,
+                    'subject_name'  => $preferred->subject?->name,
+                    'year_level'    => $slotContext['year_level'],
+                    'shift_id'      => $slotContext['shift_id'],
+                    'study_group'   => $slotContext['study_group'],
+                    'subjects'      => $subjects,
+                    // Cross-shift info — frontend shows a badge when this is set
+                    'cross_shift'        => $isCrossShift,
+                    'replace_shift_id'   => $candidateShiftId,
                 ];
             }
 
-            $options[$slot->id] = collect($slotOptions)->sortBy('name')->values()->all();
+            $options[$slot->id] = collect($slotOptions)
+                ->sortBy('cross_shift')   // same-shift first, cross-shift after
+                ->sortBy('name')
+                ->values()
+                ->all();
         }
 
         return $options;
+    }
+
+    private function matchesReplacementContextCrossShift(array $context, ClassSchedule $schedule, ?int $fallbackMajorId, bool $isCrossShift): bool
+    {
+        $majorId   = $schedule->classProgram?->major_id ?? $fallbackMajorId;
+        $yearLevel = $schedule->year_level ?? $schedule->classProgram?->year_level;
+        $shiftId   = $schedule->shift_id   ?? $schedule->classProgram?->shift_id;
+
+        $majorMatch     = (string) $majorId === (string) $context['major_id'];
+        $yearMatch      = (string) $yearLevel === (string) $context['year_level'];
+        $studyGrpMatch  = $this->studyGroup($schedule->day_of_week) === $context['study_group'];
+        $shiftMatch     = (string) $shiftId === (string) $context['shift_id'];
+
+        // Cross-shift: relax the shift constraint, keep major + year + study_group
+        return $majorMatch && $yearMatch && $studyGrpMatch && ($isCrossShift || $shiftMatch);
     }
 
     private function replacementContext(ClassSchedule $slot, ?int $fallbackMajorId = null): array

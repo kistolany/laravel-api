@@ -135,6 +135,7 @@ final class RbacPermissionCatalog
             'class_schedule.create',
             'class_schedule.update',
             'class_schedule.delete',
+            'class_schedule.archive.view',
 
             'teacher_attendance.view',
             'teacher_attendance.create',

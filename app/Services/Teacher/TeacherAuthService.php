@@ -332,6 +332,13 @@ class TeacherAuthService
                     $uploadOptions
                 );
                 $url = $result['secure_url'] ?? null;
+                // If Cloudinary strips the extension (raw uploads), append it so the URL is self-describing
+                if ($url && isset($result['format']) && $result['format'] !== '') {
+                    $ext = strtolower($result['format']);
+                    if (!str_ends_with(strtolower($url), ".{$ext}")) {
+                        $url .= ".{$ext}";
+                    }
+                }
             } catch (\Throwable $e) {
                 Log::error('Teacher file upload failed on Cloudinary.', ['error' => $e->getMessage()]);
                 throw new ApiException(ResponseStatus::INTERNAL_SERVER_ERROR, 'Failed to upload file.');

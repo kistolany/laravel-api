@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ClassSchedule extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'class_schedules';
 
     protected $fillable = [
@@ -25,6 +28,9 @@ class ClassSchedule extends Model
         'code',
         'start_date',
         'end_date',
+        'status',
+        'deleted_by',
+        'delete_reason',
     ];
 
     protected $casts = [

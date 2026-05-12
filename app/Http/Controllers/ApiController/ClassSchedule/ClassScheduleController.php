@@ -10,6 +10,8 @@ use App\Http\Resources\ClassSchedule\ClassScheduleResource;
 use App\Services\ClassSchedule\ClassScheduleService;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class ClassScheduleController extends Controller
 {
@@ -50,6 +52,29 @@ class ClassScheduleController extends Controller
         $this->service->delete((int) $id);
 
         return $this->success(null, 'Class schedule deleted successfully!');
+    }
+
+    public function archive($id, Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'delete_reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $this->service->archive((int) $id, Auth::id(), $data['delete_reason'] ?? null);
+
+        return $this->success(null, 'Class schedule archived successfully.');
+    }
+
+    public function restore($id): JsonResponse
+    {
+        $schedule = $this->service->restore((int) $id);
+
+        return $this->success(new ClassScheduleResource($schedule), 'Class schedule restored successfully.');
+    }
+
+    public function archived(): JsonResponse
+    {
+        return $this->success($this->service->archived());
     }
 
     public function byClass($classId): JsonResponse

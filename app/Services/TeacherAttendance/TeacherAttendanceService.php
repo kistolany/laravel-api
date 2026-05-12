@@ -52,6 +52,7 @@ class TeacherAttendanceService extends BaseService
             $rows = collect($data['records'])
                 ->map(fn (array $record): array => [
                     'teacher_id'         => (int) $record['teacher_id'],
+                    'schedule_id'        => isset($record['schedule_id']) ? (int) $record['schedule_id'] : null,
                     'attendance_date'    => $data['date'],
                     'session'            => (int) $record['session'],
                     'status'             => $record['status'],
@@ -69,8 +70,8 @@ class TeacherAttendanceService extends BaseService
 
             TeacherAttendance::upsert(
                 $rows,
-                ['teacher_id', 'attendance_date', 'session'],
-                ['status', 'check_in_time', 'check_out_time', 'note', 'recorded_by', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'updated_at']
+                ['schedule_id', 'attendance_date', 'session'],
+                ['teacher_id', 'status', 'check_in_time', 'check_out_time', 'note', 'recorded_by', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'updated_at']
             );
 
             return [
@@ -111,10 +112,28 @@ class TeacherAttendanceService extends BaseService
             $attendances = TeacherAttendance::query()
                 ->whereIn('teacher_id', $teacherIds)
                 ->whereBetween('attendance_date', [$filters['from'], $filters['to']])
-                ->select('teacher_id', 'schedule_id', 'session', 'attendance_date', 'status', 'note', 'replace_teacher_id', 'replace_status', 'replace_subject_id')
-                ->with(['replaceTeacher:id,first_name,last_name', 'replaceSubject:id,name'])
+                ->select('teacher_id', 'schedule_id', 'session', 'attendance_date', 'status', 'note', 'replace_teacher_id', 'replace_status', 'replace_subject_id', 'replace_shift_id')
+                ->with(['replaceTeacher:id,first_name,last_name', 'replaceSubject:id,name', 'replaceShift:id,name'])
                 ->get()
                 ->groupBy(fn ($a) => $a->schedule_id . '_' . (is_string($a->attendance_date) ? $a->attendance_date : $a->attendance_date->format('Y-m-d')));
+
+            // Makeup sessions for these schedules
+            $allScheduleIds = $schedules->flatten(1)->pluck('id')->all();
+            $makeups = \App\Models\ScheduleMakeupSession::query()
+                ->whereIn('schedule_id', $allScheduleIds)
+                ->select('id', 'schedule_id', 'makeup_schedule_id', 'teacher_id', 'makeup_date', 'makeup_session', 'shift_id', 'attendance_status', 'absent_week_number', 'absent_date', 'status', 'note')
+                ->with(['makeupShift:id,name', 'makeupSchedule:id,subject_id,shift_id', 'makeupSchedule.subject:id,name', 'makeupSchedule.shift:id,name'])
+                ->get()
+                ->groupBy('schedule_id');
+
+            // All shifts for the makeup shift dropdown
+            $allShifts = \App\Models\Shift::query()
+                ->select('id', 'name')
+                ->orderBy('name')
+                ->get()
+                ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
+                ->values()
+                ->all();
 
             // All teachers list for substitute dropdown
             $subjectsByTeacherYear = $this->teacherSubjectsByYear($teacherIds);
@@ -129,10 +148,10 @@ class TeacherAttendanceService extends BaseService
                     'subjects_by_year' => $subjectsByTeacherYear[$t->id] ?? [],
                 ]);
 
-            $result = $teachers->map(function (Teacher $teacher) use ($schedules, $attendances, $replacementOptions) {
+            $result = $teachers->map(function (Teacher $teacher) use ($schedules, $attendances, $replacementOptions, $makeups, $allShifts) {
                 $teacherSchedules = $schedules->get($teacher->id, collect());
 
-                $slots = $teacherSchedules->map(function (\App\Models\ClassSchedule $s) use ($attendances, $replacementOptions, $teacher) {
+                $slots = $teacherSchedules->map(function (\App\Models\ClassSchedule $s) use ($attendances, $replacementOptions, $teacher, $makeups) {
                     // Compute 15 week dates from start_date aligned to day_of_week
                     $weeks = $this->computeWeekDates($s->start_date, $s->day_of_week, 15);
 
@@ -150,6 +169,46 @@ class TeacherAttendanceService extends BaseService
                         ];
                     })->values();
 
+                    // Makeup sessions already scheduled for this slot
+                    $slotMakeups = ($makeups->get($s->id) ?? collect())->map(fn ($m) => [
+                        'id'                 => $m->id,
+                        'makeup_schedule_id' => $m->makeup_schedule_id,
+                        'makeup_slot_subject'=> $m->makeupSchedule?->subject?->name,
+                        'makeup_slot_shift'  => $m->makeupSchedule?->shift?->name,
+                        'makeup_date'        => is_string($m->makeup_date) ? $m->makeup_date : $m->makeup_date->format('Y-m-d'),
+                        'makeup_session'     => $m->makeup_session,
+                        'shift_id'           => $m->shift_id,
+                        'shift_name'         => $m->makeupShift?->name,
+                        'attendance_status'  => $m->attendance_status,
+                        'absent_week_number' => $m->absent_week_number,
+                        'absent_date'        => is_string($m->absent_date) ? $m->absent_date : $m->absent_date->format('Y-m-d'),
+                        'status'             => $m->status,
+                        'note'               => $m->note,
+                    ])->values()->all();
+
+                    // Keys of absences that are already covered by a completed makeup
+                    $coveredKeys = collect($slotMakeups)
+                        ->where('status', 'completed')
+                        ->map(fn ($m) => $m['absent_week_number'] . '_' . $m['makeup_session'])
+                        ->flip()
+                        ->all();
+
+                    // Absent weeks that still need a makeup (not yet covered)
+                    $absentWeeks = $weekRows->flatMap(function (array $wk) use ($coveredKeys) {
+                        $absent = [];
+                        foreach ([1 => $wk['s1'], 2 => $wk['s2']] as $ses => $sess) {
+                            $key = $wk['week'] . '_' . $ses;
+                            if ($sess['is_saved'] && $sess['status'] === 'Absent' && !isset($coveredKeys[$key])) {
+                                $absent[] = [
+                                    'week_number' => $wk['week'],
+                                    'absent_date' => $wk['date'],
+                                    'session'     => $ses,
+                                ];
+                            }
+                        }
+                        return $absent;
+                    })->values()->all();
+
                     return [
                         'schedule_id' => $s->id,
                         'subject'     => $s->subject?->name,
@@ -165,7 +224,9 @@ class TeacherAttendanceService extends BaseService
                         'end_date'    => $s->end_date   ? (is_string($s->end_date)   ? $s->end_date   : $s->end_date->format('Y-m-d'))   : null,
                         'shift'       => $s->shift ? ['id' => $s->shift->id, 'name' => $s->shift->name, 'time_range' => $s->shift->time_range] : null,
                         'replacement_options' => $replacementOptions[$s->id] ?? [],
-                        'weeks'       => $weekRows,
+                        'weeks'          => $weekRows,
+                        'absent_weeks'   => $absentWeeks,
+                        'makeup_sessions'=> $slotMakeups,
                     ];
                 })->values();
 
@@ -186,6 +247,7 @@ class TeacherAttendanceService extends BaseService
                 'to'           => $filters['to'],
                 'teachers'     => $result,
                 'all_teachers' => $allTeachers,
+                'all_shifts'   => $allShifts,
             ];
         });
     }
@@ -233,6 +295,8 @@ class TeacherAttendanceService extends BaseService
             'replace_status'       => $att?->replace_status,
             'replace_subject_id'   => $att?->replace_subject_id,
             'replace_subject_name' => $att?->replaceSubject?->name,
+            'replace_shift_id'     => $att?->replace_shift_id,
+            'replace_shift_name'   => $att?->replaceShift?->name,
             'is_saved'             => $att !== null,
         ];
     }
@@ -249,11 +313,17 @@ class TeacherAttendanceService extends BaseService
         $contextSchedules = \App\Models\ClassSchedule::query()
             ->whereIn('teacher_id', $teacherIds)
             ->select('id', 'teacher_id', 'class_program_id', 'subject_id', 'shift_id', 'year_level', 'semester', 'day_of_week')
-            ->with(['subject:id,name', 'classProgram:id,major_id,shift_id,year_level,semester'])
+            ->with(['subject:id,name', 'classProgram:id,major_id,shift_id,year_level,semester', 'shift:id,name'])
             ->get()
             ->groupBy('teacher_id');
 
         $byTeacher = $teachers->keyBy('id');
+
+        // Track per teacher which shift_ids they teach (across all schedules, not just today)
+        $teacherShiftIds = $contextSchedules
+            ->groupBy('teacher_id')
+            ->map(fn (Collection $rows) => $rows->pluck('shift_id')->unique()->values()->all());
+
         $options = [];
 
         foreach ($schedules as $slot) {
@@ -264,46 +334,73 @@ class TeacherAttendanceService extends BaseService
             }
 
             $slotOptions = [];
+            $slotContext = $this->replacementContext($slot, $original->major_id);
+
             foreach ($teachers as $candidate) {
                 if ($candidate->id === $slot->teacher_id) continue;
+                // Skip only if candidate teaches THIS EXACT shift on this day
                 if ($busy->has($slot->day_of_week . '_' . $slot->shift_id . '_' . $candidate->id)) continue;
 
-                $slotContext = $this->replacementContext($slot, $original->major_id);
+                // Detect cross-shift: candidate normally teaches a different shift
+                $candidateShifts    = $teacherShiftIds[$candidate->id] ?? [];
+                $isCrossShift       = !empty($candidateShifts) && !in_array($slot->shift_id, $candidateShifts, false);
+                $candidateShiftId   = $isCrossShift ? ($candidateShifts[0] ?? null) : null;
+                $candidateShiftName = $isCrossShift
+                    ? ($contextSchedules->get($candidate->id)?->first(fn ($s) => $s->shift_id === $candidateShiftId)?->shift?->name)
+                    : null;
+
                 $subjectSchedules = $contextSchedules->get($candidate->id, collect())
-                    ->filter(fn (\App\Models\ClassSchedule $s) => $this->matchesReplacementContext($slotContext, $s, $candidate->major_id))
+                    ->filter(fn (\App\Models\ClassSchedule $s) => $this->matchesReplacementContextCrossShift($slotContext, $s, $candidate->major_id, $isCrossShift))
                     ->filter(fn (\App\Models\ClassSchedule $s) => $s->subject_id)
-                    ->unique(fn (\App\Models\ClassSchedule $s) => $s->subject_id . '_' . $s->shift_id . '_' . ($s->year_level ?? $s->classProgram?->year_level))
+                    ->unique(fn (\App\Models\ClassSchedule $s) => $s->subject_id . '_' . ($s->year_level ?? $s->classProgram?->year_level))
                     ->sortBy('subject.name')
                     ->values();
 
                 if ($subjectSchedules->isEmpty()) continue;
 
                 $subjects = $subjectSchedules->map(fn (\App\Models\ClassSchedule $s) => [
-                    'id' => $s->subject_id,
-                    'name' => $s->subject?->name,
-                    'shift_id' => $s->shift_id,
+                    'id'         => $s->subject_id,
+                    'name'       => $s->subject?->name,
+                    'shift_id'   => $s->shift_id,
                     'year_level' => $s->year_level ?? $s->classProgram?->year_level,
                 ])->values();
 
                 $preferred = $subjectSchedules->first();
 
                 $slotOptions[] = [
-                    'id' => $candidate->id,
-                    'name' => trim($candidate->first_name . ' ' . $candidate->last_name),
-                    'major_id' => $candidate->major_id,
-                    'subject_id' => $preferred->subject_id,
-                    'subject_name' => $preferred->subject?->name,
-                    'year_level' => $slotContext['year_level'],
-                    'shift_id' => $slotContext['shift_id'],
-                    'study_group' => $slotContext['study_group'],
-                    'subjects' => $subjects,
+                    'id'               => $candidate->id,
+                    'name'             => trim($candidate->first_name . ' ' . $candidate->last_name),
+                    'major_id'         => $candidate->major_id,
+                    'subject_id'       => $preferred->subject_id,
+                    'subject_name'     => $preferred->subject?->name,
+                    'year_level'       => $slotContext['year_level'],
+                    'shift_id'         => $slotContext['shift_id'],
+                    'study_group'      => $slotContext['study_group'],
+                    'subjects'         => $subjects,
+                    'cross_shift'      => $isCrossShift,
+                    'replace_shift_id' => $candidateShiftId,
+                    'shift_name'       => $candidateShiftName,
                 ];
             }
 
-            $options[$slot->id] = collect($slotOptions)->sortBy('name')->values()->all();
+            $options[$slot->id] = collect($slotOptions)->sortBy('cross_shift')->sortBy('name')->values()->all();
         }
 
         return $options;
+    }
+
+    private function matchesReplacementContextCrossShift(array $context, \App\Models\ClassSchedule $schedule, ?int $fallbackMajorId, bool $isCrossShift): bool
+    {
+        $majorId    = $schedule->classProgram?->major_id ?? $fallbackMajorId;
+        $yearLevel  = $schedule->year_level ?? $schedule->classProgram?->year_level;
+        $shiftId    = $schedule->shift_id   ?? $schedule->classProgram?->shift_id;
+
+        $majorMatch    = (string) $majorId === (string) $context['major_id'];
+        $yearMatch     = (string) $yearLevel === (string) $context['year_level'];
+        $studyGrpMatch = $this->studyGroup($schedule->day_of_week) === $context['study_group'];
+        $shiftMatch    = (string) $shiftId === (string) $context['shift_id'];
+
+        return $majorMatch && $yearMatch && $studyGrpMatch && ($isCrossShift || $shiftMatch);
     }
 
     private function replacementContext(\App\Models\ClassSchedule $slot, ?int $fallbackMajorId = null): array

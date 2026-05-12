@@ -79,6 +79,55 @@ class ClassScheduleService extends BaseService
         });
     }
 
+    public function archive(int $id, ?int $deletedBy = null, ?string $reason = null): bool
+    {
+        return $this->trace(__FUNCTION__, function () use ($id, $deletedBy, $reason): bool {
+            $schedule = $this->findById($id);
+
+            $schedule->forceFill([
+                'status'        => 'archived',
+                'deleted_by'    => $deletedBy,
+                'delete_reason' => $reason,
+            ])->save();
+
+            return $schedule->delete();
+        });
+    }
+
+    public function restore(int $id): ClassSchedule
+    {
+        return $this->trace(__FUNCTION__, function () use ($id): ClassSchedule {
+            $schedule = ClassSchedule::onlyTrashed()->findOrFail($id);
+
+            $schedule->restore();
+            $schedule->forceFill([
+                'status'        => 'active',
+                'deleted_by'    => null,
+                'delete_reason' => null,
+            ])->save();
+
+            return $schedule->load(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel']);
+        });
+    }
+
+    public function archived(): array
+    {
+        return $this->trace(__FUNCTION__, function (): array {
+            return ClassSchedule::onlyTrashed()
+                ->with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])
+                ->latest('deleted_at')
+                ->get()
+                ->map(fn ($s) => (new ClassScheduleResource($s))->resolve() + [
+                    'status'        => $s->status,
+                    'deleted_at'    => $s->deleted_at?->toDateTimeString(),
+                    'deleted_by'    => $s->deleted_by,
+                    'delete_reason' => $s->delete_reason,
+                ])
+                ->values()
+                ->all();
+        });
+    }
+
     public function getByClass(int $classId): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function () use ($classId): PaginatedResult {
