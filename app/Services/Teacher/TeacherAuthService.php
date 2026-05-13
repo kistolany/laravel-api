@@ -19,6 +19,50 @@ class TeacherAuthService
 {
     use ServiceTraceable;
 
+    public function findOrFail(int $id): Teacher
+    {
+        return Teacher::with(['major', 'subject'])->findOrFail($id);
+    }
+
+    public function updateSelf(int $id, array $data): Teacher
+    {
+        $allowed = ['phone_number', 'telegram', 'image', 'cv_file', 'id_card_file', 'note', 'lesson_files', 'remove_lesson_files'];
+        $data = array_intersect_key($data, array_flip($allowed));
+
+        // Handle multiple lesson file uploads — append to existing list
+        if (!empty($data['lesson_files'])) {
+            $teacher = Teacher::findOrFail($id);
+            $existing = $teacher->lesson_files ?? [];
+
+            $newUrls = [];
+            foreach ((array) $data['lesson_files'] as $file) {
+                if ($file instanceof UploadedFile) {
+                    $newUrls[] = [
+                        'url'  => $this->uploadFile($file, 'teacher_lessons'),
+                        'name' => $file->getClientOriginalName(),
+                        'size' => $file->getSize(),
+                    ];
+                }
+            }
+
+            // Remove files the teacher explicitly deleted
+            if (!empty($data['remove_lesson_files'])) {
+                $toRemove = (array) $data['remove_lesson_files'];
+                $existing = array_values(array_filter($existing, fn($f) => !in_array($f['url'] ?? '', $toRemove, true)));
+            }
+
+            $data['lesson_files'] = array_merge($existing, $newUrls);
+        } elseif (!empty($data['remove_lesson_files'])) {
+            $teacher = Teacher::findOrFail($id);
+            $existing = $teacher->lesson_files ?? [];
+            $toRemove = (array) $data['remove_lesson_files'];
+            $data['lesson_files'] = array_values(array_filter($existing, fn($f) => !in_array($f['url'] ?? '', $toRemove, true)));
+        }
+
+        unset($data['remove_lesson_files']);
+        return $this->update($id, $data);
+    }
+
     public function register(array $data): Teacher
     {
         return $this->trace(__FUNCTION__, function () use ($data): Teacher {

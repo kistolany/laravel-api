@@ -34,6 +34,7 @@ class Teacher extends Authenticatable
         'image',
         'cv_file',
         'id_card_file',
+        'lesson_files',
         'address',
         'position',
         'degree',
@@ -66,6 +67,7 @@ class Teacher extends Authenticatable
             'dob'           => 'date',
             'join_date'     => 'date',
             'deleted_at'    => 'datetime',
+            'lesson_files'  => 'array',
         ];
     }
 

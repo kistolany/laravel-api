@@ -50,6 +50,7 @@ class TeacherResource extends JsonResource
             'image_url'      => $this->image ?: null,
             'cv_file'        => $this->cv_file ?: null,
             'id_card_file'   => $this->id_card_file ?: null,
+            'lesson_files'   => $this->lesson_files ?? [],
             // auth
             'role'           => $this->role,
             'status'         => $this->status ?: 'active',

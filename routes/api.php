@@ -106,7 +106,10 @@ Route::prefix('v1')->group(function () {
         Route::patch('{id}/restore', [TeacherAuthController::class, 'restore'])->middleware('permission:teacher.update|teacher.delete');
         Route::post('register', [TeacherAuthController::class, 'register'])->middleware('permission:teacher.create');
         Route::post('upload-image', [TeacherAuthController::class, 'uploadImage']);
-        Route::get('{id}/file', [TeacherAuthController::class, 'viewFile'])->middleware('permission:teacher.view|teacher.active.view');
+        Route::get('{id}/file', [TeacherAuthController::class, 'viewFile']);
+        Route::get('me', [TeacherAuthController::class, 'me']);
+        Route::post('me', [TeacherAuthController::class, 'updateSelf']);
+        Route::get('{id}', [TeacherAuthController::class, 'show'])->whereNumber('id')->middleware('permission:teacher.view|teacher.active.view');
         Route::post('{id}', [TeacherAuthController::class, 'update'])->middleware('permission:teacher.update|teacher.status.update');
     });
 
