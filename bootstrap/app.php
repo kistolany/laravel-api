@@ -7,6 +7,7 @@ use App\Enums\ResponseStatus;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -28,6 +29,20 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions) {
         // Always return JSON for API responses
         $exceptions->shouldRenderJsonWhen(fn () => true);
+
+        // Standardize validation errors — return errors map in `data`
+        $exceptions->render(function (ValidationException $e, $request) {
+            return response()->json([
+                'datetime'  => now()->toDateTimeString(),
+                'timestamp' => sprintf('%.0f', floor(microtime(true) * 1000)),
+                'status'    => ResponseStatus::EXISTING_DATA->text(),
+                'code'      => 422,
+                'message'   => $e->getMessage(),
+                'data'      => null,
+                'errors'    => $e->errors(),
+                'trace'     => '',
+            ], 422);
+        });
 
         // Standardize "route not found" responses
         $exceptions->render(function (NotFoundHttpException $e, $request) {

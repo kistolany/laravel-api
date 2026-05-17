@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ApiController\AcademicInfo\AcademicInfoController;
 use App\Http\Controllers\ApiController\AcademicSetting\AcademicTermController;
+use App\Http\Controllers\ApiController\AcademicSetting\AcademicYearController;
 use App\Http\Controllers\ApiController\AcademicSetting\YearLevelController;
 use App\Http\Controllers\ApiController\Auth\AuthController;
 use App\Http\Controllers\ApiController\Dashboard\DashboardController;
@@ -211,6 +212,11 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('academic-terms', AcademicTermController::class)->only(['index', 'show'])->middleware('permission:academic_info.view|role.view');
         Route::apiResource('academic-terms', AcademicTermController::class)->only(['store', 'update'])->middleware('permission:academic_info.update|role.update');
         Route::apiResource('academic-terms', AcademicTermController::class)->only(['destroy'])->middleware('permission:academic_info.delete|role.update');
+        Route::get('academic-years', [AcademicYearController::class, 'index'])->middleware('permission:academic_info.view|role.view');
+        Route::post('academic-years', [AcademicYearController::class, 'store'])->middleware('permission:academic_info.update|role.update');
+        Route::get('academic-years/{id}', [AcademicYearController::class, 'show'])->middleware('permission:academic_info.view|role.view');
+        Route::put('academic-years/{id}', [AcademicYearController::class, 'update'])->middleware('permission:academic_info.update|role.update');
+        Route::delete('academic-years/{id}', [AcademicYearController::class, 'destroy'])->middleware('permission:academic_info.delete|role.update');
 
         // Class Schedule routes
         Route::get('class-schedules', [ClassScheduleController::class, 'index'])->middleware('permission:class_schedule.view');

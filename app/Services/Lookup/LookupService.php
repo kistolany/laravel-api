@@ -6,6 +6,7 @@ use App\Services\BaseService;
 
 use App\Models\AcademicInfo;
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\Classes;
 use App\Models\ClassProgram;
 use App\Models\ClassSchedule;
@@ -266,22 +267,18 @@ class LookupService extends BaseService
         $fn = __FUNCTION__;
         return $this->trace($fn, function () use ($fn): array {
             return $this->rememberLookup($fn, [], function (): array {
-                $values = collect();
-
-                if (Schema::hasColumn((new Classes())->getTable(), 'academic_year')) {
-                    $values = $values->merge(Classes::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'));
-                }
-
-                if (Schema::hasColumn((new StudentScore())->getTable(), 'academic_year')) {
-                    $values = $values->merge(StudentScore::query()->whereNotNull('academic_year')->distinct()->pluck('academic_year'));
-                }
-
-                return $values
-                    ->filter()
-                    ->unique()
-                    ->sortDesc()
-                    ->values()
-                    ->map(fn ($value) => ['value' => (string) $value, 'label' => (string) $value])
+                return AcademicYear::query()
+                    ->orderByDesc('name')
+                    ->get()
+                    ->map(fn (AcademicYear $y) => [
+                        'id'         => $y->id,
+                        'value'      => $y->name,
+                        'label'      => $y->name,
+                        'name'       => $y->name,
+                        'status'     => $y->status,
+                        'start_date' => $y->start_date?->toDateString(),
+                        'end_date'   => $y->end_date?->toDateString(),
+                    ])
                     ->toArray();
             });
         });

@@ -7,7 +7,6 @@ use App\Http\Requests\Room\RoomRequest;
 use App\Models\Room;
 use App\Traits\ApiResponseTrait;
 use App\Enums\ResponseMessage;
-use App\Enums\ResponseStatus;
 use Illuminate\Http\JsonResponse;
 
 class RoomController extends Controller
@@ -28,7 +27,7 @@ class RoomController extends Controller
     {
         $room = Room::create($request->validated());
 
-        return $this->success($room, ResponseMessage::CREATED, ResponseStatus::CREATED);
+        return $this->success($room, ResponseMessage::SUCCESS);
     }
 
     public function show(int $id): JsonResponse
