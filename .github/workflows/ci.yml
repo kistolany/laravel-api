@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,17 +37,17 @@ jobs:
 
       - name: Prepare test environment
         run: |
-          @'
-          APP_ENV=testing
-          APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-          APP_DEBUG=true
-          DB_CONNECTION=sqlite
-          DB_DATABASE=:memory:
-          CACHE_STORE=array
-          QUEUE_CONNECTION=sync
-          SESSION_DRIVER=array
-          MAIL_MAILER=array
-          '@ | Set-Content -Path .env
+          @(
+            'APP_ENV=testing'
+            'APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+            'APP_DEBUG=true'
+            'DB_CONNECTION=sqlite'
+            'DB_DATABASE=:memory:'
+            'CACHE_STORE=array'
+            'QUEUE_CONNECTION=sync'
+            'SESSION_DRIVER=array'
+            'MAIL_MAILER=array'
+          ) | Set-Content -Path .env
 
       - name: Run tests
         run: php artisan test
