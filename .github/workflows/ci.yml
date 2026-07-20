@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
       - name: Check out source
@@ -36,16 +36,17 @@ jobs:
 
       - name: Prepare test environment
         run: |
-          printf '%s\n' \
-            'APP_ENV=testing' \
-            'APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
-            'APP_DEBUG=true' \
-            'DB_CONNECTION=sqlite' \
-            'DB_DATABASE=:memory:' \
-            'CACHE_STORE=array' \
-            'QUEUE_CONNECTION=sync' \
-            'SESSION_DRIVER=array' \
-            'MAIL_MAILER=array' > .env
+          @'
+          APP_ENV=testing
+          APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          APP_DEBUG=true
+          DB_CONNECTION=sqlite
+          DB_DATABASE=:memory:
+          CACHE_STORE=array
+          QUEUE_CONNECTION=sync
+          SESSION_DRIVER=array
+          MAIL_MAILER=array
+          '@ | Set-Content -Path .env
 
       - name: Run tests
         run: php artisan test
