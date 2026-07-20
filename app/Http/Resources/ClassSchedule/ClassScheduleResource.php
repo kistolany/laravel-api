@@ -37,6 +37,8 @@ class ClassScheduleResource extends JsonResource
             'class_name'       => $this->classroom?->name,
             'major_id'         => $program?->major_id,
             'major_name'       => $program?->major?->name,
+            'faculty_id'       => $program?->major?->faculty_id,
+            'faculty_name'     => $program?->major?->faculty?->name,
             'subject_id'       => $this->subject_id,
             'subject_name'     => $this->subject?->name,
             'teacher_id'       => $this->teacher_id,

@@ -1,0 +1,51 @@
+name: API CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, pdo_sqlite, sqlite3, bcmath, zip, gd, intl
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate Composer files
+        run: composer validate --strict
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare test environment
+        run: |
+          printf '%s\n' \
+            'APP_ENV=testing' \
+            'APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+            'APP_DEBUG=true' \
+            'DB_CONNECTION=sqlite' \
+            'DB_DATABASE=:memory:' \
+            'CACHE_STORE=array' \
+            'QUEUE_CONNECTION=sync' \
+            'SESSION_DRIVER=array' \
+            'MAIL_MAILER=array' > .env
+
+      - name: Run tests
+        run: php artisan test

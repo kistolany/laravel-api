@@ -22,7 +22,7 @@ class ClassScheduleService extends BaseService
     public function index(): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function (): PaginatedResult {
-            $query = ClassSchedule::with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])->latest();
+            $query = ClassSchedule::with(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel'])->latest();
 
             return $this->paginateResponse($query, ClassScheduleResource::class);
         });
@@ -31,7 +31,7 @@ class ClassScheduleService extends BaseService
     public function findById(int $id): ClassSchedule
     {
         return $this->trace(__FUNCTION__, function () use ($id): ClassSchedule {
-            $schedule = ClassSchedule::with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])->find($id);
+            $schedule = ClassSchedule::with(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel'])->find($id);
 
             if (!$schedule) {
                 Log::warning('ClassSchedule not found.', ['id' => $id]);
@@ -51,7 +51,7 @@ class ClassScheduleService extends BaseService
 
             $schedule = ClassSchedule::create($payload);
 
-            return $schedule->load(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel']);
+            return $schedule->load(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel']);
         });
     }
 
@@ -66,7 +66,7 @@ class ClassScheduleService extends BaseService
 
             $schedule->update($payload);
 
-            return $schedule->load(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel']);
+            return $schedule->load(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel']);
         });
     }
 
@@ -106,7 +106,7 @@ class ClassScheduleService extends BaseService
                 'delete_reason' => null,
             ])->save();
 
-            return $schedule->load(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel']);
+            return $schedule->load(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel']);
         });
     }
 
@@ -114,7 +114,7 @@ class ClassScheduleService extends BaseService
     {
         return $this->trace(__FUNCTION__, function (): array {
             return ClassSchedule::onlyTrashed()
-                ->with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])
+                ->with(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel'])
                 ->latest('deleted_at')
                 ->get()
                 ->map(fn ($s) => (new ClassScheduleResource($s))->resolve() + [
@@ -131,7 +131,7 @@ class ClassScheduleService extends BaseService
     public function getByClass(int $classId): PaginatedResult
     {
         return $this->trace(__FUNCTION__, function () use ($classId): PaginatedResult {
-            $query = ClassSchedule::with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])
+            $query = ClassSchedule::with(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel'])
                 ->where('class_id', $classId)
                 ->latest();
 
@@ -214,7 +214,7 @@ class ClassScheduleService extends BaseService
                     $ids[] = $schedule->id;
                 }
 
-                return ClassSchedule::with(['classProgram.major', 'classProgram.shift', 'classroom.programs.major', 'subject', 'teacher', 'shift', 'roomModel'])
+                return ClassSchedule::with(['classProgram.major.faculty', 'classProgram.shift', 'classroom.programs.major.faculty', 'subject', 'teacher', 'shift', 'roomModel'])
                     ->whereIn('id', $ids)
                     ->get();
             });
