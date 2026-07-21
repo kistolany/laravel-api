@@ -224,15 +224,15 @@ class AuthService
                     'username' => $username,
                     'ip' => $ip,
                 ]);
-                throw new AuthenticationException('account not exist');
+                throw new AuthenticationException('Username does not exist.');
             }
 
             if (!Hash::check($password, (string) $user->password_hash)) {
-                Log::warning('Failed login attempt: account is not correct.', [
+                Log::warning('Failed login attempt: incorrect password.', [
                     'username' => $username,
                     'ip' => $ip,
                 ]);
-                throw new AuthenticationException('account is not correct');
+                throw new AuthenticationException('Password is incorrect.');
             }
             
             if ($user->status !== 'Active') {
