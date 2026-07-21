@@ -43,8 +43,8 @@ COPY . .
 # 4. Install Laravel dependencies
 RUN composer install --no-interaction --optimize-autoloader
 
-# 5. Expose Port 8000
-EXPOSE 9000
+# Railway routes HTTP traffic to the port provided in $PORT.
+EXPOSE 8080
 
-# 6. Start PHP-FPM for Nginx upstream
-CMD ["php-fpm", "-F"]
+# Start Laravel's HTTP server directly; no separate Nginx container is used.
+CMD ["sh", "-c", "php artisan serve --host=0.0.0.0 --port=${PORT:-8080}"]
