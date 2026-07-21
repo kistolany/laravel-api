@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: windows-latest
 
     steps:
       - name: Check out source
